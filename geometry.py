@@ -25,6 +25,7 @@ class Soup:
     triangles: wp.array(dtype = int)
     edges: wp.array(dtype = int)
     body: wp.array(dtype = int)
+    x_transformed: wp.array(dtype = vec3)
 
 class OBJComplex:
     def __init__(self):
@@ -82,8 +83,9 @@ class OBJComplex:
         geom.triangles = self.indices
         geom.body = self.body
         geom.edges = self.edges
+        geom.x_transformed = wp.zeros_like(self.xcs)
         self.soup = geom
-        
+
         print(f"{meshes_filename} loaded, {self.n_nodes} nodes, {F.shape[0]} faces")
 
     def compute_transforms(self):

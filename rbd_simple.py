@@ -3,9 +3,11 @@ import warp as wp
 from BDF1 import BDFHistory, cdot, qdot, vdot, wdot, dcdot_dc, dqdot_dq, forward_states
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq
 from geometry import OBJComplex
+from xpbd_contact import RBDDelta, XConstraint, Inertia, XPBDContact, add_dlam_kernel
 # gravity = -9.8
 gravity = 0.
-eps = 1e-6
+length = scalar(0.2)
+
 @wp.kernel
 def compute_V(xcs: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), n_nodes_per_body: int, V: wp.array(dtype = vec3)):
     i = wp.tid()
@@ -30,6 +32,11 @@ def init(history: wp.array(dtype = BDFHistory)):
 
     history[i].nxt = history[i].now
 
+@wp.kernel
+def _set_inertia_kernel(meta: wp.array(dtype = Inertia)):
+    i = wp.tid()
+    meta[i].m = scalar(1.0)
+    meta[i].J = mat33(scalar(0.4) * meta[i].m * length * length)
 
 class RigidBodyBase:
     def __init__(self):
@@ -38,6 +45,11 @@ class RigidBodyBase:
         n_bodies = self.n_bodies
 
         self.history = wp.zeros(n_bodies, dtype = BDFHistory)
+        self.inertia = wp.zeros(n_bodies, dtype = Inertia)
+        self.set_inertia()
+
+    def set_inertia(self): 
+        wp.launch(_set_inertia_kernel, self.n_bodies, inputs = [self.inertia])
 
 class RbdComplex(RigidBodyBase, OBJComplex):
     '''
@@ -65,45 +77,6 @@ class RbdComplex(RigidBodyBase, OBJComplex):
         self.V = V.numpy()
         return self.V
 
-@wp.struct
-class RBDDelta: 
-    dx: vec3
-    dq: vec4
-
-@wp.struct 
-class XConstraint: 
-    e0: int 
-    e1: int 
-    alpha: scalar
-    lam: scalar
-
-@wp.kernel
-def add_dlam_kernel(p: wp.array(dtype = BDFHistory), xconstraints: wp.array(dtype = XConstraint), deltas: wp.array(dtype = wp.vec3), delta_counts: wp.array(dtype = int)):
-    i = wp.tid()
-    c = xconstraints[i]
-
-    # l0 = c.l0
-    # v10 = p[c.v0].x - p[c.v1].x
-    # dist = wp.length(v10)
-    # w0 = p[c.v0].w
-    # w1 = p[c.v1].w
-
-    # denom = w0 + w1 + c.alpha
-    # common = -(dist - l0) - c.alpha * c.lam
-    # dlam = common / denom
-
-    # c.lam += dlam
-    # gradient = v10 / (dist + eps)
-    # dx0 = w0 * dlam * gradient
-    # dx1 = -w1 * dlam * gradient
-
-    # wp.atomic_add(deltas, c.v0, dx0)
-    # wp.atomic_add(deltas, c.v1, dx1)
-
-
-    # wp.atomic_add(delta_counts, c.e0, 1)
-    # wp.atomic_add(delta_counts, c.e1, 1)
-
 
 @wp.kernel
 def predict_position(p: wp.array(dtype = BDFHistory), dt: scalar):
@@ -125,21 +98,21 @@ def add_dx_kernel(p: wp.array(dtype = BDFHistory), deltas: wp.array(dtype = RBDD
         deltas[i].dq = vec4(scalar(0.0))
         delta_counts[i] = 0
 
-class XPBDRbd(RbdComplex):
+class XPBDRbd(RbdComplex, XPBDContact):
     def __init__(self, h, meshes_filename):
-        super().__init__(h, meshes_filename)
+        RbdComplex.__init__(self, h, meshes_filename)
         self.deltas = wp.zeros(self.n_bodies, dtype = RBDDelta)
         self.delta_counts = wp.zeros((self.n_bodies,), dtype = int)
+        XPBDContact.__init__(self)       
 
     def predict_position(self): 
         wp.launch(predict_position, self.n_bodies, inputs = [self.history, self.dt])
-    def initialize_multiplier(self):
-        pass 
 
     def add_dlambda(self):
-        # wp.launch(add_dlam_kernel, self.n_bodies, inputs = [self.history, self.deltas, self.delta_counts])
+        n_contacts = self.contacts.cnt.numpy()[0]
+        wp.launch(add_dlam_kernel, (n_contacts, ), inputs = [self.history, self.inertia, self.contacts.list, self.deltas, self.delta_counts, self.dt])
         pass
-    
+
     def add_dx(self):
         wp.launch(add_dx_kernel, self.n_bodies, inputs = [self.history, self.deltas, self.delta_counts])
 
@@ -148,7 +121,9 @@ class XPBDRbd(RbdComplex):
             # substeps
 
             self.predict_position()
+            self.detect_collision()
             self.initialize_multiplier()
+
             for iter in range(10):
                 # xpbd iters 
                 self.deltas.zero_()
