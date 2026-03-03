@@ -3,10 +3,12 @@ import polyscope.imgui as gui
 import numpy as np 
 class PSViewer:
     def __init__(self, rbd):
-        self.V = rbd.xcs.numpy()
+        self.V = rbd.soup.x_transformed.numpy()
         self.F = rbd.F
 
-        self.ps_mesh = ps.register_surface_mesh("rbd", self.V, self.F)
+        # self.ps_mesh = ps.register_surface_mesh("rbd", self.V, self.F)
+        self.ps_medial = ps.register_curve_network("rbd", self.V, rbd.E)
+        self.ps_medial.set_radius(0.095, relative=False)
         self.frame = 0
         self.rbd = rbd
         self.ui_pause = True
@@ -42,7 +44,8 @@ class PSViewer:
         if self.animate: 
             self.rbd.step()
             self.V = self.rbd.compute_V()
-            self.ps_mesh.update_vertex_positions(self.V)
+            # self.ps_mesh.update_vertex_positions(self.V)
+            self.ps_medial.update_node_positions(self.V)
             self.frame = self.rbd.frame
             
             print("frame = ", self.frame)

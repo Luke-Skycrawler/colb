@@ -2,7 +2,7 @@ import warp as wp
 from viewer import PSViewer
 import polyscope as ps
 import numpy as np 
-thickness = 5e-3
+thickness = 0.095
 contact_volume = 1024
 from quat_util import vec3, vec4, mat33, mat44, scalar
 from geometry import Soup
@@ -60,6 +60,7 @@ def _hash(a1: int, b1: int) -> int:
 def append(contacts: Contacts, a1: int, a2: int, b1: int, b2: int):
     idx = wp.atomic_add(contacts.cnt, 0, 1)
     h = _hash(a1, b1)
+    idx = idx % contact_volume
     contacts.list[idx].a1a2b1b2 = wp.vec4i(a1, a2, b1, b2)
     contacts.htable[h] = idx
 

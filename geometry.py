@@ -70,6 +70,7 @@ class SimComplexBase:
 
         self.V = V
         self.F = F
+        self.E = E
         self.n_bodies = body_idx
 
     def get_next_object(self):

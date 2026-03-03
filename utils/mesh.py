@@ -4,6 +4,7 @@ import numpy as np
 import igl
 from pxr import UsdGeom, Usd
 import pyHouGeoIO
+from medial import SlabMesh
 
 class RawMeshFromFile:
     '''
@@ -38,6 +39,7 @@ class RawMeshFromFile:
         self.V = np.zeros((0, 3))
         self.F = np.zeros((0, 3), dtype = int)
         vertices, indices = self.V, self.F
+        edges = None
         if file in ["box", "sphere"]:
             '''predefined shapes'''
             return 
@@ -46,12 +48,20 @@ class RawMeshFromFile:
             vertices, indices = self.load_usd_mesh(folder + file, usd_path)
         elif file.endswith((".bgeo")):
             vertices, indices = self.load_bgeo_triangle_mesh(file, folder)
-        else:
+        elif file.endswith((".obj")):
             '''load obj'''
             vertices, indices = igl.read_triangle_mesh(folder + file)
             indices = np.array(indices, dtype = int).reshape(-1, 3)
             # vertices, _, _, indices, _, _ = igl.read_obj("my_model.obj")
+        elif file.endswith((".ma")): 
+            mesh = SlabMesh(file)
+            vertices, edges, indices = mesh.V, mesh.E, mesh.F
+
         self.V, self.F = vertices, indices
+        if edges is None: 
+            self.E = igl.edges(self.F)
+        else: 
+            self.E = edges
         self.file = file
 
 if __name__ == "__main__":

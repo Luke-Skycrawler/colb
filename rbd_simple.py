@@ -21,11 +21,12 @@ def compute_V(xcs: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory)
     V[i] = v1
 
 @wp.kernel
-def init(history: wp.array(dtype = BDFHistory)):    
+def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3)):    
     i = wp.tid()
     z = scalar(0.0)
     o = scalar(1.0)
-    history[i].now.c = vec3(z, z, z)
+    # history[i].now.c = vec3(z, z, z)
+    history[i].now.c = vec3(scalar(p[i].x), scalar(p[i].y), scalar(p[i].z))
     history[i].now.q = vec4(z, z, z, o)
     history[i].now.v = vec3(z, z, z)
     history[i].now.w = vec4(z, z, z, z)
@@ -67,11 +68,16 @@ class RbdComplex(RigidBodyBase, JSONComplex):
         self.reset()
         
     def reset(self):
-        wp.launch(init, self.n_bodies, inputs = [self.history])
+        p = np.array([obj.p for obj in self.kinetic_objects])
+        pwp = wp.array(p, dtype = wp.vec3)
+        # print(f"p = {p}")
+        wp.launch(init, self.n_bodies, inputs = [self.history, pwp])
         self.frame: int = 0
+        self.compute_V()
 
     def compute_V(self):
-        V = wp.zeros_like(self.xcs)
+        # V = wp.zeros_like(self.xcs)
+        V = self.soup.x_transformed
         wp.launch(compute_V, self.n_nodes, inputs = [self.xcs, self.history, self.n_nodes_per_body, V])
         self.V = V.numpy()
         return self.V

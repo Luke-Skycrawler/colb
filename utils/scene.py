@@ -3,7 +3,6 @@ import numpy as np
 import json
 from typing import List, TypeVar, Generic
 from geometry import SimComplexBase
-import igl
 from scipy.spatial.transform import Rotation as R
 T = TypeVar('T')
 class KineticMesh(RawMeshFromFile):
@@ -72,7 +71,6 @@ class JSONComplex(Scene, SimComplexBase):
 
     def get_next_object(self):
         for obj in self.kinetic_objects: 
-            edges = igl.edges(obj.F)
 
             angles = obj.euler
 
@@ -82,8 +80,9 @@ class JSONComplex(Scene, SimComplexBase):
             # 3×3 rotation matrix
             R_mat = r.as_matrix()
 
-            v = obj.V @ R_mat.T + obj.p
-            yield v, edges, obj.F
+            v = obj.V @ R_mat.T * 2
+            # fixme, scale should be removed later
+            yield v, obj.E, obj.F
     
 
 if __name__ == "__main__":
