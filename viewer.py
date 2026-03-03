@@ -9,7 +9,7 @@ class PSViewer:
         self.ps_mesh = ps.register_surface_mesh("rbd", self.V, self.F)
         self.frame = 0
         self.rbd = rbd
-        self.ui_pause = False
+        self.ui_pause = True
         self.animate = False
         self.ui_reload_from = 0
         self.end_frame = 8000

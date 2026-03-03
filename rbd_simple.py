@@ -4,6 +4,7 @@ from BDF1 import BDFHistory, cdot, qdot, vdot, wdot, dcdot_dc, dqdot_dq, forward
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq
 from geometry import OBJComplex
 from xpbd_contact import RBDDelta, XConstraint, Inertia, XPBDContact, add_dlam_kernel
+from utils.scene import JSONComplex
 # gravity = -9.8
 gravity = 0.
 length = scalar(0.2)
@@ -39,9 +40,8 @@ def _set_inertia_kernel(meta: wp.array(dtype = Inertia)):
     meta[i].J = mat33(scalar(0.4) * meta[i].m * length * length)
 
 class RigidBodyBase:
-    def __init__(self):
-        super().__init__()
-        self.n_bodies = len(self.meshes_filename)
+    def __init__(self, *args):
+        super().__init__(*args)
         n_bodies = self.n_bodies
 
         self.history = wp.zeros(n_bodies, dtype = BDFHistory)
@@ -51,13 +51,12 @@ class RigidBodyBase:
     def set_inertia(self): 
         wp.launch(_set_inertia_kernel, self.n_bodies, inputs = [self.inertia])
 
-class RbdComplex(RigidBodyBase, OBJComplex):
+class RbdComplex(RigidBodyBase, JSONComplex):
     '''
     NOTE: need to have self.meshes_filename and self.transforms predefined before calling super().__init__()
     '''
-    def __init__(self, h, meshes_filename):
-        self.meshes_filename = meshes_filename
-        super().__init__()
+    def __init__(self, h, config_file):
+        super().__init__(config_file)
         self.V0 = self.xcs.numpy()
         self.F = self.indices.numpy().reshape(-1, 3)
 

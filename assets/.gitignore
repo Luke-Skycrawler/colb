@@ -1,2 +1,3 @@
 *.obj
 link/
+!link.obj

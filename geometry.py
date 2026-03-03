@@ -27,17 +27,9 @@ class Soup:
     body: wp.array(dtype = int)
     x_transformed: wp.array(dtype = vec3)
 
-class OBJComplex:
-    def __init__(self):
-        '''
-        form a complex of all simulation meshes and exposes tet geometry interface 
 
-        NOTE: need to have self.meshes_filename predefined before calling super().__init__()
-        '''
-
-        # transforms = self.compute_transforms() 
-        meshes_filename = self.meshes_filename
-
+class SimComplexBase:
+    def __init__(self): 
         self.n_nodes = 0
         V = np.zeros((0, 3), dtype = float)
         F_from_file = np.zeros((0, 3), dtype = int)
@@ -45,20 +37,10 @@ class OBJComplex:
         E = np.zeros((0, 2), dtype = int)
         B = np.zeros(0, dtype = int)
         body_idx = 0
-        for f in meshes_filename:
-            
-            if f.endswith(".obj"):
-                v, _, _, ff, _, _ = igl.read_obj(f)
-                e = igl.edges(ff)
 
-            elif f.endswith(".ma"): 
-                mesh = SlabMesh(f)
-                v, e, ff, r = mesh.V, mesh.E, mesh.F, mesh.R
-            
-            elif f.endswith(".tobj"):
-                print("tobj not supported")
-                quit()
-
+        nxt = self.get_next_object()
+        for nxt in self.get_next_object():
+            v, e, ff = nxt
             b = np.ones((v.shape[0],), dtype = int) * body_idx
             V = np.vstack((V, v))
             E = np.vstack((E, e + self.n_nodes))
@@ -86,7 +68,41 @@ class OBJComplex:
         geom.x_transformed = wp.zeros_like(self.xcs)
         self.soup = geom
 
-        print(f"{meshes_filename} loaded, {self.n_nodes} nodes, {F.shape[0]} faces")
+        self.V = V
+        self.F = F
+        self.n_bodies = body_idx
+
+    def get_next_object(self):
+        return []
+
+class OBJComplex(SimComplexBase):
+    def __init__(self):
+        '''
+        form a complex of all simulation meshes and exposes tet geometry interface 
+
+        NOTE: need to have self.meshes_filename predefined before calling super().__init__()
+        '''
+        super().__init__()
+        print(f"{self.meshes_filename} loaded, {self.n_nodes} nodes, {self.F.shape[0]} faces")
+
+    def get_next_object(self):
+        # transforms = self.compute_transforms() 
+        meshes_filename = self.meshes_filename
+        for f in meshes_filename:
+            
+            if f.endswith(".obj"):
+                v, _, _, ff, _, _ = igl.read_obj(f)
+                e = igl.edges(ff)
+
+            elif f.endswith(".ma"): 
+                mesh = SlabMesh(f)
+                v, e, ff, r = mesh.V, mesh.E, mesh.F, mesh.R
+            
+            elif f.endswith(".tobj"):
+                print("tobj not supported")
+                quit()
+            
+            yield v, e, ff
 
     def compute_transforms(self):
         '''
