@@ -23,23 +23,25 @@ def compute_V(geo: Soup, history: wp.array(dtype = BDFHistory)):
     geo.x_transformed[i] = v1
 
 @wp.kernel
-def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3)):    
+def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3), mass: wp.array(dtype = Inertia)):    
     i = wp.tid()
     z = scalar(0.0)
     o = scalar(1.0)
+    t = scalar(3.0)
     # history[i].now.c = vec3(z, z, z)
     history[i].now.c = vec3(scalar(p[i].x), scalar(p[i].y), scalar(p[i].z))
     history[i].now.q = vec4(z, z, z, o)
     history[i].now.v = vec3(z, z, z)
     history[i].now.w = vec4(z, z, z, z)
-    history[i].now.omega = vec3(z, z, o)
+    if mass[i].m > scalar(0.0): 
+        history[i].now.omega = vec3(z, z, t)
 
     history[i].nxt = history[i].now
 
 @wp.kernel
-def _set_inertia_kernel(meta: wp.array(dtype = Inertia)):
+def _set_inertia_kernel(meta: wp.array(dtype = Inertia), m: wp.array(dtype = scalar)):
     i = wp.tid()
-    meta[i].m = scalar(1.0)
+    meta[i].m = wp.max(m[i], scalar(0.0))
     # meta[i].J = mat33(scalar(0.4) * meta[i].m * length * length)
     meta[i].J = scalar(0.4) * meta[i].m * length * length
 
@@ -53,7 +55,10 @@ class RigidBodyBase:
         self.set_inertia()
 
     def set_inertia(self): 
-        wp.launch(_set_inertia_kernel, self.n_bodies, inputs = [self.inertia])
+        m = wp.zeros((self.n_bodies, ), dtype = scalar)
+        mnp = np.array([obj.mass for obj in self.kinetic_objects], dtype = float)
+        m.assign(mnp / 1000.0)
+        wp.launch(_set_inertia_kernel, self.n_bodies, inputs = [self.inertia, m])
 
 class RbdComplex(RigidBodyBase, JSONComplex):
     '''
@@ -74,7 +79,7 @@ class RbdComplex(RigidBodyBase, JSONComplex):
         p = np.array([obj.p for obj in self.kinetic_objects])
         pwp = wp.array(p, dtype = wp.vec3)
         # print(f"p = {p}")
-        wp.launch(init, self.n_bodies, inputs = [self.history, pwp])
+        wp.launch(init, self.n_bodies, inputs = [self.history, pwp, self.inertia])
         self.frame: int = 0
         self.compute_V()
 

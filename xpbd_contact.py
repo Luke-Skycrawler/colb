@@ -10,8 +10,7 @@ reference: [1] Detailed Rigid Body Simulation with Extended Position Based Dynam
 '''
 
 eps = 1e-6
-# gravity = -9.8
-gravity = 0.
+gravity = -9.8
 
 @wp.struct
 class RBDDelta: 
@@ -26,6 +25,7 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
     i = wp.tid()
     c = xconstraints[i]
     o = scalar(1.0)
+    z = scalar(0.0)
 
     l0 = c.l0
     i0 = c.a1a2b1b2[0]
@@ -53,6 +53,7 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
 
     v10 = v0 - v1
     dist = scalar(dab[2])
+    m1 = mass[b0].m
 
     if dist < l0: 
         # Eqs. (2) - (5)
@@ -63,8 +64,13 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
         r2 = v1 - c1 
         a1 = wp.cross(r1, n)
         a2 = wp.cross(r2, n)
-        w1 = o / mass[b0].m + wp.dot(a1, (o / mass[b0].J) * a1)
-        w2 = o / mass[b1].m + wp.dot(a1, (o / mass[b1].J) * a2)
+        w1 = z
+        w2 = z
+        m2 = mass[b1].m
+        if m1 > z:
+            w1 = o / m1 + wp.dot(a1, (o / mass[b0].J) * a1)
+        if m2 > z:
+            w2 = o / m2 + wp.dot(a2, (o / mass[b1].J) * a2)
 
         lam = c.lam
         common = -cc - c.alpha / (dt * dt) * lam
@@ -74,31 +80,35 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
         # Eqs. (6) - (9)
         xconstraints[i].lam = dlam + lam
         pp = dlam * n 
-        dx1 = pp / mass[b0].m
-        dx2 = -pp / mass[b1].m
         
-        r1xp = wp.cross(r1, pp) / mass[b0].J
-        dq1 = scalar(0.5) * quat_mult(vec4(r1xp.x, r1xp.y, r1xp.z, scalar(0.0)), p[b0].nxt.q)
+        if m1 > z:
+            dx1 = pp / m1
+            r1xp = wp.cross(r1, pp) / mass[b0].J
+            dq1 = scalar(0.5) * quat_mult(vec4(r1xp.x, r1xp.y, r1xp.z, scalar(0.0)), p[b0].nxt.q)
+            wp.atomic_add(deltas.dx, b0, dx1)
+            wp.atomic_add(deltas.dq, b0, dq1)
+            wp.atomic_add(deltas.cnt, b0, 1)
         
-        r2xp = wp.cross(r2, pp) / mass[b1].J
-        dq2 = scalar(-0.5) * quat_mult(vec4(r2xp.x, r2xp.y, r2xp.z, scalar(0.0)), p[b1].nxt.q)
+        if m2 > z:
+            dx2 = -pp / m2
+            r2xp = wp.cross(r2, pp) / mass[b1].J
+            dq2 = scalar(-0.5) * quat_mult(vec4(r2xp.x, r2xp.y, r2xp.z, scalar(0.0)), p[b1].nxt.q)
 
-        wp.atomic_add(deltas.dx, b0, dx1)
-        wp.atomic_add(deltas.dq, b0, dq1)
 
-        wp.atomic_add(deltas.dx, b1, dx2)
-        wp.atomic_add(deltas.dq, b1, dq2)
+            wp.atomic_add(deltas.dx, b1, dx2)
+            wp.atomic_add(deltas.dq, b1, dq2)
 
-        wp.atomic_add(deltas.cnt, b0, 1)
-        wp.atomic_add(deltas.cnt, b1, 1)
+            wp.atomic_add(deltas.cnt, b1, 1)
 
 
 @wp.kernel
-def predict_position(p: wp.array(dtype = BDFHistory), dt: scalar):
+def predict_position(p: wp.array(dtype = BDFHistory), dt: scalar, mass: wp.array(dtype = Inertia)):
     i = wp.tid()
     z = scalar(0.0)
-    p[i].nxt.v += dt * vec3(z, scalar(gravity), z)
+    # p[i].nxt.v += dt * vec3(z, scalar(gravity), z)
     p[i].nxt.c += p[i].nxt.v * dt
+    if mass[i].m > z:
+        p[i].nxt.c += dt * vec3(z, scalar(gravity), z) * dt * scalar(0.5)
     p[i].nxt.q += scalar(0.5) * wp.transpose(Gq(p[i].nxt.q)) @ p[i].nxt.omega * dt
     p[i].nxt.q = wp.normalize(p[i].nxt.q)
 
@@ -150,7 +160,7 @@ class XPBDRbd(RbdComplex, ContactSolverBase):
         ContactSolverBase.__init__(self)
 
     def predict_position(self): 
-        wp.launch(predict_position, self.n_bodies, inputs = [self.history, self.dt])
+        wp.launch(predict_position, self.n_bodies, inputs = [self.history, self.dt, self.inertia])
 
     def add_dlambda(self):
         wp.launch(add_dlam_kernel, (self.n_contacts, ), inputs = [self.history, self.inertia, self.soup, self.contacts_new.list, self.deltas, self.dt])
@@ -166,20 +176,21 @@ class XPBDRbd(RbdComplex, ContactSolverBase):
         wp.launch(initialize_lam, (self.n_contacts, ), inputs = [self.contacts_new.list])
 
     def step(self):
-        for ss in range(1):
-            # substeps
+        for ss in range(4):
+            with wp.ScopedTimer("step"):
+                # substeps
 
-            self.predict_position()
-            self.detect_collision()
-            self.initialize_multiplier()
+                self.predict_position()
+                self.detect_collision()
+                self.initialize_multiplier()
 
-            for iter in range(1):
-                # xpbd iters 
-                self.deltas.dx.zero_()
-                self.deltas.dq.zero_()
-                self.deltas.cnt.zero_()
+                for iter in range(30):
+                    # xpbd iters 
+                    self.deltas.dx.zero_()
+                    self.deltas.dq.zero_()
+                    self.deltas.cnt.zero_()
 
-                self.add_dlambda()
-                self.add_dx()
-            self.forward_states()
+                    self.add_dlambda()
+                    self.add_dx()
+                self.forward_states()
         

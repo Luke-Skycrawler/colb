@@ -68,7 +68,7 @@ def append(contacts: Contacts, a1: int, a2: int, b1: int, b2: int):
     idx = idx % contact_volume
     contacts.list[idx].a1a2b1b2 = wp.vec4i(a1, a2, b1, b2)
     contacts.list[idx].l0 = scalar(thickness * 2.0)
-    contacts.list[idx].alpha = scalar(1e-2)
+    contacts.list[idx].alpha = scalar(1e-6)
     contacts.htable[h] = idx
 
 @wp.kernel
