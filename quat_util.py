@@ -166,6 +166,16 @@ def _test_H_kernel(q: wp.array(dtype = vec4), diff: wp.array(dtype = scalar)):
 
     diff[i] = wp.trace(dh @ wp.transpose(dh))
 
+@wp.func 
+def quat_mult(q1: vec4, q2: vec4) -> vec4:
+    x1, y1, z1, w1 = q1.x, q1.y, q1.z, q1.w
+    x2, y2, z2, w2 = q2.x, q2.y, q2.z, q2.w
+    return vec4(
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    )
 
 if __name__ == "__main__":
     wp.init()

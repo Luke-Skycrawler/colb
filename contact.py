@@ -3,7 +3,7 @@ from viewer import PSViewer
 import polyscope as ps
 import numpy as np 
 thickness = 0.0475
-contact_volume = 1024
+contact_volume = 2048
 from quat_util import vec3, vec4, mat33, mat44, scalar
 from geometry import Soup
 # TODO: make sure max_unroll = 0
@@ -63,6 +63,7 @@ def append(contacts: Contacts, a1: int, a2: int, b1: int, b2: int):
     idx = idx % contact_volume
     contacts.list[idx].a1a2b1b2 = wp.vec4i(a1, a2, b1, b2)
     contacts.list[idx].l0 = scalar(thickness * 2.0)
+    contacts.list[idx].alpha = scalar(1e-2)
     contacts.htable[h] = idx
 
 @wp.kernel
@@ -90,7 +91,7 @@ def edge_edge_collision(bvh: wp.uint64, x: wp.array(dtype = vec3), edges: wp.arr
                 q2 = wp.vec3(x[b2])
                 std = wp.closest_point_edge_edge(p1, p2, q1, q2, 1e-6)
                 dist = std[2]
-                if dist < thickness * 2.0:
+                if dist < thickness * 2.5:
                     append(contacts, a1, a2, b1, b2)
 
 @wp.func 

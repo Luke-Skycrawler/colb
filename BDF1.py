@@ -1,6 +1,5 @@
 import warp as wp 
-from quat_util import RigidState, scalar, vec3, vec4, mat33, mat44
-
+from quat_util import RigidState, scalar, vec3, vec4, mat33, mat44, quat_mult
 @wp.struct 
 class BDFHistory: 
     '''
@@ -67,8 +66,19 @@ def dvdot_dv(history: BDFHistory, dt: scalar) -> mat33:
 
     
 @wp.kernel
-def forward_states(history: wp.array(dtype = BDFHistory)):
+def forward_states(history: wp.array(dtype = BDFHistory), dt: scalar):
     i = wp.tid()
+    history[i].nxt.v = (history[i].nxt.c - history[i].now.c) / dt
+
+    q_prev = history[i].now.q
+    q_prev_inv = vec4(-q_prev.x, -q_prev.y, -q_prev.z, q_prev.w)
+    dq = quat_mult(history[i].nxt.q, q_prev_inv)
+    
+    omega = scalar(2.0) * vec3(dq.x, dq.y, dq.z) / dt
+    if dq.w < scalar(0.0):
+        omega = -omega
+
+    history[i].nxt.omega = omega
     history[i].now = history[i].nxt
 
 @wp.kernel

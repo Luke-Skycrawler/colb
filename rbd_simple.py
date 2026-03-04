@@ -30,7 +30,7 @@ def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3)):
     history[i].now.q = vec4(z, z, z, o)
     history[i].now.v = vec3(z, z, z)
     history[i].now.w = vec4(z, z, z, z)
-    history[i].now.omega = vec3(z, o, o)
+    history[i].now.omega = vec3(z, z, o)
 
     history[i].nxt = history[i].now
 
@@ -91,6 +91,7 @@ def predict_position(p: wp.array(dtype = BDFHistory), dt: scalar):
     p[i].nxt.v += dt * vec3(z, scalar(gravity), z)
     p[i].nxt.c += p[i].nxt.v * dt
     p[i].nxt.q += scalar(0.5) * wp.transpose(Gq(p[i].nxt.q)) @ p[i].nxt.omega * dt
+    p[i].nxt.q = wp.normalize(p[i].nxt.q)
 
 @wp.kernel
 def add_dx_kernel(p: wp.array(dtype = BDFHistory), deltas: RBDDelta, delta_counts: wp.array(dtype = int)):
@@ -100,9 +101,14 @@ def add_dx_kernel(p: wp.array(dtype = BDFHistory), deltas: RBDDelta, delta_count
         p[i].nxt.q += deltas.dq[i] / scalar(delta_counts[i])
         p[i].nxt.q = wp.normalize(p[i].nxt.q)
 
-        deltas.dx[i] = vec3(scalar(0.0))
-        deltas.dq[i] = vec4(scalar(0.0))
-        delta_counts[i] = 0
+    deltas.dx[i] = vec3(scalar(0.0))
+    deltas.dq[i] = vec4(scalar(0.0))
+    delta_counts[i] = 0
+
+@wp.kernel
+def initialize_lam(contacts: wp.array(dtype = XConstraint)):
+    i = wp.tid()
+    contacts[i].lam = scalar(0.0)
 
 class XPBDRbd(RbdComplex, XPBDContact):
     def __init__(self, h, meshes_filename):
@@ -133,7 +139,7 @@ class XPBDRbd(RbdComplex, XPBDContact):
             self.detect_collision()
             self.initialize_multiplier()
 
-            for iter in range(10):
+            for iter in range(1):
                 # xpbd iters 
                 self.deltas.dx.zero_()
                 self.deltas.dq.zero_()
@@ -141,7 +147,7 @@ class XPBDRbd(RbdComplex, XPBDContact):
                 self.add_dlambda()
                 self.add_dx()
 
-            wp.launch(forward_states, self.n_bodies, inputs = [self.history])
+            wp.launch(forward_states, self.n_bodies, inputs = [self.history, self.dt])
             # wp.copy(self.states_now, self.states_nxt)
             # print(f'   states_nxt q = {self.history.numpy()["nxt"]["q"]}')        
             self.frame += 1
@@ -150,5 +156,6 @@ class XPBDRbd(RbdComplex, XPBDContact):
         self.deltas.dx.zero_()
         self.deltas.dq.zero_()
         self.delta_counts.zero_()
+        wp.launch(initialize_lam, (self.n_contacts, ), inputs = [self.contacts_new.list])
         
         
