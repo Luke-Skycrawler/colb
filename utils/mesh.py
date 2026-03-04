@@ -3,7 +3,7 @@ import warp as wp
 import numpy as np
 import igl
 from pxr import UsdGeom, Usd
-import pyHouGeoIO
+# import pyHouGeoIO
 from medial import SlabMesh
 
 class RawMeshFromFile:

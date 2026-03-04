@@ -3,42 +3,31 @@ from geometry import Soup
 from BDF1 import BDFHistory
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult
 from contact import ContactSolverBase, XConstraint
+from rbd_simple import RbdComplex, Inertia
 
 '''
 reference: [1] Detailed Rigid Body Simulation with Extended Position Based Dynamics
 '''
+
 eps = 1e-6
+# gravity = -9.8
+gravity = 0.
 
 @wp.struct
 class RBDDelta: 
     dx: wp.array(dtype = vec3)
     dq: wp.array(dtype = vec4)
+    cnt: wp.array(dtype = int)
 
-# @wp.struct 
-# class XConstraint: 
-#     e0: int 
-#     e1: int 
-#     l0: scalar
-#     alpha: scalar
-#     lam: scalar
-
-@wp.struct 
-class Inertia: 
-    m: scalar
-    J: scalar
 
 
 @wp.kernel
-def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), deltas: RBDDelta, delta_counts: wp.array(dtype = int), dt: scalar):
+def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), deltas: RBDDelta, dt: scalar):
     i = wp.tid()
     c = xconstraints[i]
     o = scalar(1.0)
 
     l0 = c.l0
-    # i0 = soup.edges[c.e0 * 2]
-    # i1 = soup.edges[c.e0 * 2 + 1]
-    # i2 = soup.edges[c.e1 * 2]
-    # i3 = soup.edges[c.e1 * 2 + 1]
     i0 = c.a1a2b1b2[0]
     i1 = c.a1a2b1b2[1]
     i2 = c.a1a2b1b2[2]
@@ -100,13 +89,97 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
         wp.atomic_add(deltas.dx, b1, dx2)
         wp.atomic_add(deltas.dq, b1, dq2)
 
-        wp.atomic_add(delta_counts, b0, 1)
-        wp.atomic_add(delta_counts, b1, 1)
+        wp.atomic_add(deltas.cnt, b0, 1)
+        wp.atomic_add(deltas.cnt, b1, 1)
 
 
-class XPBDContact(ContactSolverBase): 
-    def __init__(self): 
-        ContactSolverBase.__init__(self)
+@wp.kernel
+def predict_position(p: wp.array(dtype = BDFHistory), dt: scalar):
+    i = wp.tid()
+    z = scalar(0.0)
+    p[i].nxt.v += dt * vec3(z, scalar(gravity), z)
+    p[i].nxt.c += p[i].nxt.v * dt
+    p[i].nxt.q += scalar(0.5) * wp.transpose(Gq(p[i].nxt.q)) @ p[i].nxt.omega * dt
+    p[i].nxt.q = wp.normalize(p[i].nxt.q)
+
+@wp.kernel
+def add_dx_kernel(p: wp.array(dtype = BDFHistory), deltas: RBDDelta):
+    i = wp.tid()
+    if deltas.cnt[i] > 0:
+        p[i].nxt.c += deltas.dx[i] / scalar(deltas.cnt[i])
+        p[i].nxt.q += deltas.dq[i] / scalar(deltas.cnt[i])
+        p[i].nxt.q = wp.normalize(p[i].nxt.q)
+
+    deltas.dx[i] = vec3(scalar(0.0))
+    deltas.dq[i] = vec4(scalar(0.0))
+    deltas.cnt[i] = 0
+
+@wp.kernel
+def initialize_lam(contacts: wp.array(dtype = XConstraint)):
+    i = wp.tid()
+    contacts[i].lam = scalar(0.0)
+
+@wp.kernel
+def forward_states(history: wp.array(dtype = BDFHistory), dt: scalar):
+    i = wp.tid()
+    history[i].nxt.v = (history[i].nxt.c - history[i].now.c) / dt
+
+    q_prev = history[i].now.q
+    q_prev_inv = vec4(-q_prev.x, -q_prev.y, -q_prev.z, q_prev.w)
+    dq = quat_mult(history[i].nxt.q, q_prev_inv)
     
+    omega = scalar(2.0) * vec3(dq.x, dq.y, dq.z) / dt
+    if dq.w < scalar(0.0):
+        omega = -omega
+
+    history[i].nxt.omega = omega
+    history[i].now = history[i].nxt
+
+
+class XPBDRbd(RbdComplex, ContactSolverBase):
+    def __init__(self, h, meshes_filename):
+        RbdComplex.__init__(self, h, meshes_filename)
+        deltas = RBDDelta()
+
+        deltas.dx = wp.zeros(self.n_bodies, dtype = vec3)
+        deltas.dq = wp.zeros(self.n_bodies, dtype = vec4)
+        deltas.cnt = wp.zeros((self.n_bodies,), dtype = int)
+
+        self.deltas = deltas
+
+        ContactSolverBase.__init__(self)
+
+    def predict_position(self): 
+        wp.launch(predict_position, self.n_bodies, inputs = [self.history, self.dt])
+
+    def add_dlambda(self):
+        wp.launch(add_dlam_kernel, (self.n_contacts, ), inputs = [self.history, self.inertia, self.soup, self.contacts_new.list, self.deltas, self.dt])
+
+    def add_dx(self):
+        wp.launch(add_dx_kernel, self.n_bodies, inputs = [self.history, self.deltas])
+
+    def forward_states(self):
+        wp.launch(forward_states, self.n_bodies, inputs = [self.history, self.dt])
+        self.frame += 1
+
     def initialize_multiplier(self):
-        pass
+        wp.launch(initialize_lam, (self.n_contacts, ), inputs = [self.contacts_new.list])
+
+    def step(self):
+        for ss in range(1):
+            # substeps
+
+            self.predict_position()
+            self.detect_collision()
+            self.initialize_multiplier()
+
+            for iter in range(1):
+                # xpbd iters 
+                self.deltas.dx.zero_()
+                self.deltas.dq.zero_()
+                self.deltas.cnt.zero_()
+
+                self.add_dlambda()
+                self.add_dx()
+            self.forward_states()
+        

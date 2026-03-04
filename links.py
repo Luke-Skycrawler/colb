@@ -1,9 +1,8 @@
 import polyscope as ps 
-from rbd_simple import XPBDRbd
 import warp as wp
 from viewer import PSViewer
-
 from utils.scene import JSONComplex
+from xpbd_contact import XPBDRbd
 def free_float():
     ps.init()
     wp.config.max_unroll = 0

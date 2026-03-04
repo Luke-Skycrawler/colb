@@ -1,24 +1,26 @@
 import numpy as np 
 import warp as wp
-from BDF1 import BDFHistory, cdot, qdot, vdot, wdot, dcdot_dc, dqdot_dq, forward_states
+from BDF1 import BDFHistory
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq
-from geometry import OBJComplex
-from xpbd_contact import RBDDelta, XConstraint, Inertia, XPBDContact, add_dlam_kernel
 from utils.scene import JSONComplex
-# gravity = -9.8
-gravity = 0.
+from geometry import Soup
 length = scalar(0.2)
 
+@wp.struct 
+class Inertia: 
+    m: scalar
+    J: scalar
+
 @wp.kernel
-def compute_V(xcs: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), n_nodes_per_body: int, V: wp.array(dtype = vec3)):
+def compute_V(geo: Soup, history: wp.array(dtype = BDFHistory)):
     i = wp.tid()
-    bd = i // n_nodes_per_body
+    bd = geo.body[i]
     qi = history[bd].now.q
     ci = history[bd].now.c
     R = Rq(qi)
-    v0 = xcs[i]
+    v0 = geo.xcs[i]
     v1 = (R @ v0) + ci
-    V[i] = v1
+    geo.x_transformed[i] = v1
 
 @wp.kernel
 def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3)):    
@@ -77,85 +79,7 @@ class RbdComplex(RigidBodyBase, JSONComplex):
         self.compute_V()
 
     def compute_V(self):
-        # V = wp.zeros_like(self.xcs)
         V = self.soup.x_transformed
-        wp.launch(compute_V, self.n_nodes, inputs = [self.xcs, self.history, self.n_nodes_per_body, V])
+        wp.launch(compute_V, self.n_nodes, inputs = [self.soup, self.history])
         self.V = V.numpy()
         return self.V
-
-
-@wp.kernel
-def predict_position(p: wp.array(dtype = BDFHistory), dt: scalar):
-    i = wp.tid()
-    z = scalar(0.0)
-    p[i].nxt.v += dt * vec3(z, scalar(gravity), z)
-    p[i].nxt.c += p[i].nxt.v * dt
-    p[i].nxt.q += scalar(0.5) * wp.transpose(Gq(p[i].nxt.q)) @ p[i].nxt.omega * dt
-    p[i].nxt.q = wp.normalize(p[i].nxt.q)
-
-@wp.kernel
-def add_dx_kernel(p: wp.array(dtype = BDFHistory), deltas: RBDDelta, delta_counts: wp.array(dtype = int)):
-    i = wp.tid()
-    if delta_counts[i] > 0:
-        p[i].nxt.c += deltas.dx[i] / scalar(delta_counts[i])
-        p[i].nxt.q += deltas.dq[i] / scalar(delta_counts[i])
-        p[i].nxt.q = wp.normalize(p[i].nxt.q)
-
-    deltas.dx[i] = vec3(scalar(0.0))
-    deltas.dq[i] = vec4(scalar(0.0))
-    delta_counts[i] = 0
-
-@wp.kernel
-def initialize_lam(contacts: wp.array(dtype = XConstraint)):
-    i = wp.tid()
-    contacts[i].lam = scalar(0.0)
-
-class XPBDRbd(RbdComplex, XPBDContact):
-    def __init__(self, h, meshes_filename):
-        RbdComplex.__init__(self, h, meshes_filename)
-        deltas = RBDDelta()
-
-        deltas.dx = wp.zeros(self.n_bodies, dtype = vec3)
-        deltas.dq = wp.zeros(self.n_bodies, dtype = vec4)
-        self.deltas = deltas
-
-        self.delta_counts = wp.zeros((self.n_bodies,), dtype = int)
-        XPBDContact.__init__(self)       
-
-    def predict_position(self): 
-        wp.launch(predict_position, self.n_bodies, inputs = [self.history, self.dt])
-
-    def add_dlambda(self):
-        wp.launch(add_dlam_kernel, (self.n_contacts, ), inputs = [self.history, self.inertia, self.soup, self.contacts_new.list, self.deltas, self.delta_counts, self.dt])
-
-    def add_dx(self):
-        wp.launch(add_dx_kernel, self.n_bodies, inputs = [self.history, self.deltas, self.delta_counts])
-
-    def step(self):
-        for ss in range(1):
-            # substeps
-
-            self.predict_position()
-            self.detect_collision()
-            self.initialize_multiplier()
-
-            for iter in range(1):
-                # xpbd iters 
-                self.deltas.dx.zero_()
-                self.deltas.dq.zero_()
-
-                self.add_dlambda()
-                self.add_dx()
-
-            wp.launch(forward_states, self.n_bodies, inputs = [self.history, self.dt])
-            # wp.copy(self.states_now, self.states_nxt)
-            # print(f'   states_nxt q = {self.history.numpy()["nxt"]["q"]}')        
-            self.frame += 1
-
-    def initialize_multiplier(self):
-        self.deltas.dx.zero_()
-        self.deltas.dq.zero_()
-        self.delta_counts.zero_()
-        wp.launch(initialize_lam, (self.n_contacts, ), inputs = [self.contacts_new.list])
-        
-        

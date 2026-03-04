@@ -6,7 +6,12 @@ thickness = 0.0475
 contact_volume = 2048
 from quat_util import vec3, vec4, mat33, mat44, scalar
 from geometry import Soup
-# TODO: make sure max_unroll = 0
+
+'''
+TODO: make sure max_unroll = 0 before importing this module
+
+(see `fix_interference` kernel)
+'''
 
 @wp.kernel 
 def edge_aabb(x: wp.array(dtype = vec3), edges: wp.array(dtype = int), aabb_lower: wp.array(dtype = wp.vec3), aabb_upper: wp.array(dtype = wp.vec3), thickness: scalar):
@@ -115,6 +120,8 @@ def color_contacts(contacts: Contacts, color: wp.array(dtype = int), dirty: wp.a
 class ContactSolverBase:
     def __init__(self):
         '''
+        Base contact interface to detect the edge-edge contacts. Contains an optional colorization function
+
         need to have self.soup: Soup defined prior to calling this constructor
         '''
         self.soup: Soup
