@@ -11,8 +11,8 @@ eps = 1e-6
 
 @wp.struct
 class RBDDelta: 
-    dx: vec3
-    dq: vec4
+    dx: wp.array(dtype = vec3)
+    dq: wp.array(dtype = vec4)
 
 # @wp.struct 
 # class XConstraint: 
@@ -25,7 +25,7 @@ class RBDDelta:
 @wp.struct 
 class Inertia: 
     m: scalar
-    J: mat33
+    J: scalar
 
 @wp.func 
 def quat_mult(q1: vec4, q2: vec4) -> vec4:
@@ -39,9 +39,10 @@ def quat_mult(q1: vec4, q2: vec4) -> vec4:
     )
 
 @wp.kernel
-def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), deltas: wp.array(dtype = RBDDelta), delta_counts: wp.array(dtype = int), dt: scalar):
+def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), deltas: RBDDelta, delta_counts: wp.array(dtype = int), dt: scalar):
     i = wp.tid()
     c = xconstraints[i]
+    o = scalar(1.0)
 
     l0 = c.l0
     # i0 = soup.edges[c.e0 * 2]
@@ -67,24 +68,25 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
     x2 = R1 @ soup.xcs[i2] + c1
     x3 = R1 @ soup.xcs[i3] + c1
 
-    dab = wp.closest_point_edge_edge(x0, x1, x2, x3)
-    v0 = x0 + dab[0] * (x1 - x0)
-    v1 = x2 + dab[1] * (x3 - x2)
+    dab = wp.closest_point_edge_edge(wp.vec3(x0), wp.vec3(x1), wp.vec3(x2), wp.vec3(x3), eps)
+    v0 = x0 + scalar(dab[0]) * (x1 - x0)
+    v1 = x2 + scalar(dab[1]) * (x3 - x2)
     v10 = v0 - v1
     dist = wp.length(v10)
 
     if dist < l0: 
         # Eqs. (2) - (5)
-        n = v10 / (dist + eps)
+        n = v10 / (dist + scalar(eps))
+        cc = (dist + scalar(eps))
         
         r1 = v0 - c0 
         r2 = v1 - c1 
         a1 = wp.cross(r1, n)
         a2 = wp.cross(r2, n)
-        w1 = scalar(1.0) / mass[b0].m + a1 * (1.0 / mass[b0].J) * a1
-        w2 = scalar(1.0) / mass[b1].m + a1 * (1.0 / mass[b1].J) * a2
+        w1 = o / mass[b0].m + wp.dot(a1, (o / mass[b0].J) * a1)
+        w2 = o / mass[b1].m + wp.dot(a1, (o / mass[b1].J) * a2)
 
-        common = -c - c.alpha / (dt * dt)
+        common = -cc - c.alpha / (dt * dt)
         denom = w1 + w2 + c.alpha / (dt * dt)
         dlam = common / denom 
 
@@ -100,17 +102,11 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
         r2xp = wp.cross(r2, pp) / mass[b1].J
         dq2 = scalar(-0.5) * quat_mult(vec4(r2xp.x, r2xp.y, r2xp.z, scalar(0.0)), p[b1].nxt.q)
 
-        d1 = RBDDelta()
-        d1.dx = dx1
-        d1.dq = dq1
-        
-        wp.atomic_add(deltas, b0, d1)
-        
-        d2 = RBDDelta()
-        d2.dx = dx2
-        d2.dq = dq2
+        wp.atomic_add(deltas.dx, b0, dx1)
+        wp.atomic_add(deltas.dq, b0, dq1)
 
-        wp.atomic_add(deltas, b1, d2)
+        wp.atomic_add(deltas.dx, b1, dx2)
+        wp.atomic_add(deltas.dq, b1, dq2)
 
         wp.atomic_add(delta_counts, b0, 1)
         wp.atomic_add(delta_counts, b1, 1)
@@ -121,5 +117,4 @@ class XPBDContact(ContactSolverBase):
         ContactSolverBase.__init__(self)
     
     def initialize_multiplier(self):
-        pass 
-
+        pass

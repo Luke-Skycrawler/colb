@@ -38,7 +38,8 @@ def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3)):
 def _set_inertia_kernel(meta: wp.array(dtype = Inertia)):
     i = wp.tid()
     meta[i].m = scalar(1.0)
-    meta[i].J = mat33(scalar(0.4) * meta[i].m * length * length)
+    # meta[i].J = mat33(scalar(0.4) * meta[i].m * length * length)
+    meta[i].J = scalar(0.4) * meta[i].m * length * length
 
 class RigidBodyBase:
     def __init__(self, *args):
@@ -92,21 +93,26 @@ def predict_position(p: wp.array(dtype = BDFHistory), dt: scalar):
     p[i].nxt.q += scalar(0.5) * wp.transpose(Gq(p[i].nxt.q)) @ p[i].nxt.omega * dt
 
 @wp.kernel
-def add_dx_kernel(p: wp.array(dtype = BDFHistory), deltas: wp.array(dtype = RBDDelta), delta_counts: wp.array(dtype = int)):
+def add_dx_kernel(p: wp.array(dtype = BDFHistory), deltas: RBDDelta, delta_counts: wp.array(dtype = int)):
     i = wp.tid()
     if delta_counts[i] > 0:
-        p[i].nxt.c += deltas[i].dx / scalar(delta_counts[i])
-        p[i].nxt.q += deltas[i].dq / scalar(delta_counts[i])
+        p[i].nxt.c += deltas.dx[i] / scalar(delta_counts[i])
+        p[i].nxt.q += deltas.dq[i] / scalar(delta_counts[i])
         p[i].nxt.q = wp.normalize(p[i].nxt.q)
 
-        deltas[i].dx = vec3(scalar(0.0))
-        deltas[i].dq = vec4(scalar(0.0))
+        deltas.dx[i] = vec3(scalar(0.0))
+        deltas.dq[i] = vec4(scalar(0.0))
         delta_counts[i] = 0
 
 class XPBDRbd(RbdComplex, XPBDContact):
     def __init__(self, h, meshes_filename):
         RbdComplex.__init__(self, h, meshes_filename)
-        self.deltas = wp.zeros(self.n_bodies, dtype = RBDDelta)
+        deltas = RBDDelta()
+
+        deltas.dx = wp.zeros(self.n_bodies, dtype = vec3)
+        deltas.dq = wp.zeros(self.n_bodies, dtype = vec4)
+        self.deltas = deltas
+
         self.delta_counts = wp.zeros((self.n_bodies,), dtype = int)
         XPBDContact.__init__(self)       
 
@@ -114,9 +120,7 @@ class XPBDRbd(RbdComplex, XPBDContact):
         wp.launch(predict_position, self.n_bodies, inputs = [self.history, self.dt])
 
     def add_dlambda(self):
-        n_contacts = self.contacts.cnt.numpy()[0]
-        wp.launch(add_dlam_kernel, (n_contacts, ), inputs = [self.history, self.inertia, self.contacts.list, self.deltas, self.delta_counts, self.dt])
-        pass
+        wp.launch(add_dlam_kernel, (self.n_contacts, ), inputs = [self.history, self.inertia, self.soup, self.contacts_new.list, self.deltas, self.delta_counts, self.dt])
 
     def add_dx(self):
         wp.launch(add_dx_kernel, self.n_bodies, inputs = [self.history, self.deltas, self.delta_counts])
@@ -131,7 +135,9 @@ class XPBDRbd(RbdComplex, XPBDContact):
 
             for iter in range(10):
                 # xpbd iters 
-                self.deltas.zero_()
+                self.deltas.dx.zero_()
+                self.deltas.dq.zero_()
+
                 self.add_dlambda()
                 self.add_dx()
 
@@ -139,3 +145,10 @@ class XPBDRbd(RbdComplex, XPBDContact):
             # wp.copy(self.states_now, self.states_nxt)
             # print(f'   states_nxt q = {self.history.numpy()["nxt"]["q"]}')        
             self.frame += 1
+
+    def initialize_multiplier(self):
+        self.deltas.dx.zero_()
+        self.deltas.dq.zero_()
+        self.delta_counts.zero_()
+        
+        

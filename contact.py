@@ -2,7 +2,7 @@ import warp as wp
 from viewer import PSViewer
 import polyscope as ps
 import numpy as np 
-thickness = 0.095
+thickness = 0.0475
 contact_volume = 1024
 from quat_util import vec3, vec4, mat33, mat44, scalar
 from geometry import Soup
@@ -62,34 +62,37 @@ def append(contacts: Contacts, a1: int, a2: int, b1: int, b2: int):
     h = _hash(a1, b1)
     idx = idx % contact_volume
     contacts.list[idx].a1a2b1b2 = wp.vec4i(a1, a2, b1, b2)
+    contacts.list[idx].l0 = scalar(thickness * 2.0)
     contacts.htable[h] = idx
 
 @wp.kernel
-def edge_edge_collision(bvh: wp.uint64, x: wp.array(dtype = vec3), edges: wp.array(dtype = int), contacts: Contacts, thickness: scalar):
+def edge_edge_collision(bvh: wp.uint64, x: wp.array(dtype = vec3), edges: wp.array(dtype = int), contacts: Contacts, thickness: float):
     i = wp.tid()
     if True:
         # edge exists
-        low = wp.min(x[edges[i * 2]], x[edges[i * 2 + 1]]) - vec3(thickness)
-        high = wp.max(x[edges[i * 2]], x[edges[i * 2 + 1]]) + vec3(thickness)
-        query = wp.bvh_query_aabb(bvh, wp.vec3(low), wp.vec3(high))
+        a1 = edges[i * 2]
+        a2 = edges[i * 2 + 1]
+        p1 = wp.vec3(x[a1])
+        p2 = wp.vec3(x[a2])
+
+        low = wp.min(p1, p2) - wp.vec3(thickness)
+        high = wp.max(p1, p2) + wp.vec3(thickness)
+        query = wp.bvh_query_aabb(bvh, low, high)
         j = int(0) 
         while wp.bvh_query_next(query, j):
             connected = edges[i * 2] == edges[j * 2] or edges[i * 2] == edges[j * 2 + 1] or edges[i * 2 + 1] == edges[j * 2] or edges[i * 2 + 1] == edges[j * 2 + 1]
             
             if i < j and not connected: 
-                a1 = i
-                a2 = i + 1
-                b1 = j
-                b2 = j + 1
+                b1 = edges[j * 2]
+                b2 = edges[j * 2 + 1]
                 
-                p1 = wp.vec3(x[a1])
-                p2 = wp.vec3(x[a2])
                 q1 = wp.vec3(x[b1])
                 q2 = wp.vec3(x[b2])
                 std = wp.closest_point_edge_edge(p1, p2, q1, q2, 1e-6)
                 dist = std[2]
-                if dist < thickness * scalar(4.0):
+                if dist < thickness * 2.0:
                     append(contacts, a1, a2, b1, b2)
+
 @wp.func 
 def fix_interference(v: wp.vec4i, color: wp.array(dtype = int), dirty: wp.array(dtype = bool)):
     colors = wp.vec4i(color[v.x], color[v.y], color[v.z], color[v.w])
@@ -184,5 +187,5 @@ class ContactSolverBase:
         
         wp.launch(edge_edge_collision, n_edges, inputs = [self.bvh_edges.id, self.soup.x_transformed, self.soup.edges, self.contacts_new, thickness])
         self.n_contacts = self.contacts_new.cnt.numpy()[0]
-        # print(f"n contacts = {self.n_contacts}")
+        print(f"n contacts = {self.n_contacts}")
         # print(self.contacts.list.numpy()["a1a2b1b2"][:self.n_contacts])

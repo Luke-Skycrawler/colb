@@ -8,7 +8,7 @@ class PSViewer:
 
         # self.ps_mesh = ps.register_surface_mesh("rbd", self.V, self.F)
         self.ps_medial = ps.register_curve_network("rbd", self.V, rbd.E)
-        self.ps_medial.set_radius(0.095, relative=False)
+        self.ps_medial.set_radius(0.0475, relative=False)
         self.frame = 0
         self.rbd = rbd
         self.ui_pause = True
