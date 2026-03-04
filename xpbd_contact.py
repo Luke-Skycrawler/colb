@@ -176,15 +176,14 @@ class XPBDRbd(RbdComplex, ContactSolverBase):
         wp.launch(initialize_lam, (self.n_contacts, ), inputs = [self.contacts_new.list])
 
     def step(self):
-        for ss in range(4):
+        for ss in range(10):
+            # substeps
             with wp.ScopedTimer("step"):
-                # substeps
-
                 self.predict_position()
                 self.detect_collision()
                 self.initialize_multiplier()
 
-                for iter in range(30):
+                for iter in range(2):
                     # xpbd iters 
                     self.deltas.dx.zero_()
                     self.deltas.dq.zero_()
@@ -193,4 +192,3 @@ class XPBDRbd(RbdComplex, ContactSolverBase):
                     self.add_dlambda()
                     self.add_dx()
                 self.forward_states()
-        

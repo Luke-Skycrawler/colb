@@ -83,8 +83,11 @@ class RbdComplex(RigidBodyBase, JSONComplex):
         self.frame: int = 0
         self.compute_V()
 
-    def compute_V(self):
+    def compute_V(self, ret = True):
         V = self.soup.x_transformed
         wp.launch(compute_V, self.n_nodes, inputs = [self.soup, self.history])
-        self.V = V.numpy()
-        return self.V
+        if ret:
+            self.V = V.numpy()
+            return self.V
+        else:
+            return None

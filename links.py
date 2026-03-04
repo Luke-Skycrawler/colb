@@ -7,7 +7,7 @@ def free_float():
     ps.init()
     wp.config.max_unroll = 0
     wp.init()
-    dt = 1e-3
+    dt = 2e-3
     # rbd = XPBDRbd(dt, ["assets/link/link.obj"])
     rbd = XPBDRbd(dt, "assets/chains.json")
     viewer = PSViewer(rbd)

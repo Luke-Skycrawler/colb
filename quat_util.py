@@ -6,6 +6,11 @@ mat44 = wp.mat44d
 vec4 = wp.vec4d
 vec3 = wp.vec3d
 scalar = wp.float64
+# mat33 = wp.mat33
+# mat44 = wp.mat44
+# vec4 = wp.vec4
+# vec3 = wp.vec3
+# scalar = float
 
 @wp.func 
 def Gq(q: vec4):

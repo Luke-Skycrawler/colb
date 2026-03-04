@@ -187,13 +187,18 @@ class ContactSolverBase:
         # colornp = self.color.numpy()
         # print(f"color in contact pairs (19, 20, 21, 59, 60, 61): {colornp[19]}, {colornp[20]}, {colornp[21]}, {colornp[59]}, {colornp[60]}, {colornp[61]}")
     
+    def compute_V(self, ret = True): 
+        return None
+        
     def detect_collision(self): 
+        self.compute_V(ret = False)
         self.update_bvh()
         self.contacts_new.cnt.zero_()
         self.contacts_new.htable.fill_(-1)
         n_edges = self.soup.edges.shape[0] // 2
         
         wp.launch(edge_edge_collision, n_edges, inputs = [self.bvh_edges.id, self.soup.x_transformed, self.soup.edges, self.contacts_new, thickness])
+        wp.synchronize()
         self.n_contacts = self.contacts_new.cnt.numpy()[0]
-        print(f"n contacts = {self.n_contacts}")
+        # print(f"n contacts = {self.n_contacts}")
         # print(self.contacts.list.numpy()["a1a2b1b2"][:self.n_contacts])
