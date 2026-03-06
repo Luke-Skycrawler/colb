@@ -35,7 +35,8 @@ def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3), ma
     history[i].now.w = vec4(z, z, z, z)
     if mass[i].m > scalar(0.0): 
         history[i].now.omega = vec3(z, z, t)
-
+    else:
+        history[i].now.omega = vec3(z)
     history[i].nxt = history[i].now
 
 @wp.kernel

@@ -72,7 +72,7 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
         wp.atomic_add(precond, b0 + n_bodies, dpq1 * k)
         wp.atomic_add(precond, b1 + n_bodies, dpq2 * k)
         
-        f1 = k * (dist - l0) * n * dt
+        f1 = k * (l0 - dist) * n * dt
         tau1 = wp.cross(r1, f1) 
         tau2 = wp.cross(r2, -f1)
         wp.atomic_add(rhs, b0, -f1)
@@ -113,7 +113,7 @@ def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia),
 @wp.kernel
 def du_kernel(precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), du: wp.array(dtype = vec3)):
     i = wp.tid()
-    du[i] = wp.cw_div(rhs[i], precond[i])
+    du[i] = wp.cw_div(rhs[i], precond[i] + vec3(scalar(eps)))
 
 @wp.kernel
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), alpha: scalar, dt: scalar):
@@ -145,10 +145,12 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         P^GN = (M + dt ^ 2 k J^T J)^-1 
         J = (r1 cross n, n)
         '''
-        wp.launch(preconditioner_diag_kernel, dim = self.n_contacts, inputs = [self.history, self.inertia, self.soup, self.precond, self.rhs, self.dt])
+        self.precond.zero_()
+        self.rhs.zero_()
+        wp.launch(preconditioner_diag_kernel, dim = (self.n_contacts, ), inputs = [self.history, self.inertia, self.soup, self.contacts_new.list, self.precond, self.rhs, self.dt])
         
     def compute_rhs(self):
-        wp.launch(rhs_kernel, dim = self.n_bodies, inputs = [self.history, self.inertia, self.precond, self.rhs, self.dt])
+        wp.launch(rhs_kernel, dim = (self.n_bodies, ), inputs = [self.history, self.inertia, self.precond, self.rhs, self.dt])
 
     def compute_du(self): 
         wp.launch(du_kernel, dim = self.n_bodies * 2, inputs = [self.precond, self.rhs, self.du])
@@ -156,7 +158,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         return np.max(np.abs(self.du.numpy()))
 
     def add_du(self, alpha): 
-        wp.launch(add_du_kernel, dim = self.n_bodies * 2, inputs = [self.du, self.history, alpha, self.dt])
+        wp.launch(add_du_kernel, dim = (self.n_bodies,), inputs = [self.du, self.history, alpha, self.dt])
     
     def forward_states(self): 
         wp.launch(forward_states, self.n_bodies, inputs = [self.history, self.dt])
@@ -166,6 +168,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         newton = True
         iter = 0
         max_iter = 8
+        self.detect_collision()
         while newton: 
             self.compute_preconditioner()
             self.compute_rhs()
