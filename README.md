@@ -7,6 +7,7 @@ Implemented algorithms:
 [ ] avbd ^[2]
 [ ] gauss-newton implicit
 [ ] analytically projected newton ^[3]
+[ ] preconditioned gradient descend ^[4]  
 
 #### Command
 
@@ -21,3 +22,4 @@ python links.py
 [1]: Detailed Rigid Body Simulation with Extended Position Based Dynamics
 [2]: Augmented Vertex Block Descent
 [3]: A Unified Analysis of Penalty-Based Collision Energies
+[4]: Primal/Dual Descent Methods for Dynamics

@@ -3,13 +3,15 @@ import warp as wp
 from viewer import PSViewer
 from utils.scene import JSONComplex
 from xpbd_contact import XPBDRbd
+from primal import PrimalRbd
 def free_float():
     ps.init()
     wp.config.max_unroll = 0
     wp.init()
     dt = 2e-3
     # rbd = XPBDRbd(dt, ["assets/link/link.obj"])
-    rbd = XPBDRbd(dt, "assets/chains.json")
+    # rbd = XPBDRbd(dt, "assets/chains.json")
+    rbd = PrimalRbd(dt, "assets/chains.json")
     viewer = PSViewer(rbd)
     ps.set_ground_plane_mode("none")
     ps.set_user_callback(viewer.callback)
