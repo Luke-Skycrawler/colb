@@ -7,7 +7,7 @@ Implemented algorithms:
 [ ] avbd ^[2]
 [ ] gauss-newton implicit
 [ ] analytically projected newton ^[3]
-[ ] preconditioned gradient descend ^[4]  
+[x] preconditioned gradient descend (primal solver in ^[4])  
 
 #### Command
 
@@ -17,6 +17,7 @@ To run xpbd rigid body chain net simulation, use:
 python links.py
 ```
 
+Uses primal solver (`PrimalRbd`) by default. `XPBDRbd` refers to the xpbd solver. 
 #### Reference
 
 [1]: Detailed Rigid Body Simulation with Extended Position Based Dynamics

@@ -15,7 +15,7 @@ reference
 '''
 
 eps = 1e-6
-stiffness = 1e5
+stiffness = 1e4
 gravity = -9.8
 
 @wp.kernel
@@ -55,7 +55,7 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
     m1 = mass[b0].m
 
     if dist < l0: 
-        n = v10 / (dist + scalar(eps))
+        n = v10 / dist
         
         r1 = v0 - c0 
         r2 = v1 - c1
@@ -113,14 +113,14 @@ def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia),
 @wp.kernel
 def du_kernel(precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), du: wp.array(dtype = vec3)):
     i = wp.tid()
-    du[i] = wp.cw_div(rhs[i], precond[i] + vec3(scalar(eps)))
+    du[i] = wp.cw_div(rhs[i], precond[i])
 
 @wp.kernel
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), alpha: scalar, dt: scalar):
     i = wp.tid()
     n_bodies = history.shape[0]
     history[i].nxt.v -= alpha * du[i] 
-    history[i].nxt.c = history[i].now.c - dt * history[i].nxt.v
+    history[i].nxt.c = history[i].now.c + dt * history[i].nxt.v
     
     history[i].nxt.omega -= alpha * du[i + n_bodies]
     history[i].nxt.q = history[i].now.q + scalar(0.5) * wp.transpose(Gq(history[i].nxt.q)) @ history[i].nxt.omega * dt
@@ -165,19 +165,20 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         self.frame += 1
 
     def step(self):
-        newton = True
-        iter = 0
-        max_iter = 8
-        self.detect_collision()
-        while newton: 
-            self.compute_preconditioner()
-            self.compute_rhs()
-            
-            du_norm = self.compute_du() 
-            self.add_du(self.alpha)
-            iter += 1
-            print(f"iter: {iter}, du norm: {du_norm}")
-            newton = not (du_norm < 1e-5 or iter >= max_iter)
-    
-        self.forward_states()
+        for ss in range(10):
+            newton = True
+            iter = 0
+            max_iter = 4
+            self.detect_collision()
+            while newton: 
+                self.compute_preconditioner()
+                self.compute_rhs()
+                
+                du_norm = self.compute_du() 
+                self.add_du(self.alpha)
+                iter += 1
+                # print(f"    iter: {iter}, du norm: {du_norm}")
+                newton = not (du_norm < 1e-5 or iter >= max_iter)
         
+            self.forward_states()
+            
