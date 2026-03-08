@@ -18,15 +18,8 @@ class RBDDelta:
     dq: wp.array(dtype = vec4)
     cnt: wp.array(dtype = int)
 
-
-
-@wp.kernel
-def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), deltas: RBDDelta, dt: scalar):
-    i = wp.tid()
-    c = xconstraints[i]
-    o = scalar(1.0)
-    z = scalar(0.0)
-
+@wp.func 
+def fetch_dist_n_r0r1_b0b1(p: wp.array(dtype = BDFHistory), soup: Soup, c: XConstraint):
     l0 = c.l0
     i0 = c.a1a2b1b2[0]
     i1 = c.a1a2b1b2[1]
@@ -53,15 +46,33 @@ def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Iner
 
     v10 = v0 - v1
     dist = scalar(dab[2])
+
+    n = v10 / dist
+    
+    r1 = v0 - c0 
+    r2 = v1 - c1
+
+    return dist, n, r1, r2, b0, b1
+
+
+@wp.kernel
+def add_dlam_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), deltas: RBDDelta, dt: scalar):
+    i = wp.tid()
+    c = xconstraints[i]
+    o = scalar(1.0)
+    z = scalar(0.0)
+
+    l0 = c.l0
+
+    dist, n, r1, r2, b0, b1 = fetch_dist_n_r0r1_b0b1(p, soup, c)
+
     m1 = mass[b0].m
+    v10 = n * dist
 
     if dist < l0: 
         # Eqs. (2) - (5)
-        n = v10 / (dist + scalar(eps))
         cc = (dist - l0 + scalar(eps))
         
-        r1 = v0 - c0 
-        r2 = v1 - c1 
         a1 = wp.cross(r1, n)
         a2 = wp.cross(r2, n)
         w1 = z

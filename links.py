@@ -12,7 +12,6 @@ def free_float():
     wp.config.max_unroll = 0
     wp.init()
     dt = 4e-3
-    # rbd = XPBDRbd(dt, ["assets/link/link.obj"])
     # rbd = XPBDRbd(dt, "assets/chains.json")
     # rbd = PrimalRbd(dt, "assets/chains.json")
     # rbd = VBDRbd(dt, "assets/chains.json")

@@ -3,7 +3,7 @@ import numpy as np
 from primal import PrimalRbd, XConstraint, stiffness, eps, gravity, add_du_kernel, compute_u_minus_utilde
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult
 from BDF1 import BDFHistory
-from xpbd_contact import RbdComplex, ContactSolverBase, forward_states
+from xpbd_contact import RbdComplex, ContactSolverBase, forward_states, fetch_dist_n_r0r1_b0b1
 from contact import contact_volume
 from rbd_simple import Inertia
 from geometry import Soup
@@ -31,28 +31,7 @@ def contact_energy_kernel(p: wp.array(dtype = BDFHistory), soup: Soup, xconstrai
     c = xconstraints[i]
     k = scalar(stiffness)
     l0 = c.l0
-    i0 = c.a1a2b1b2[0]
-    i1 = c.a1a2b1b2[1]
-    i2 = c.a1a2b1b2[2]
-    i3 = c.a1a2b1b2[3]
-    
-    b0 = soup.body[i0]
-    b1 = soup.body[i2]
-
-    R0 = Rq(p[b0].nxt.q)
-    R1 = Rq(p[b1].nxt.q)
-    
-    c0 = p[b0].nxt.c
-    c1 = p[b1].nxt.c
-    
-    x0 = R0 @ soup.xcs[i0] + c0
-    x1 = R0 @ soup.xcs[i1] + c0
-    x2 = R1 @ soup.xcs[i2] + c1
-    x3 = R1 @ soup.xcs[i3] + c1
-
-    dab = wp.closest_point_edge_edge(wp.vec3(x0), wp.vec3(x1), wp.vec3(x2), wp.vec3(x3), eps)
-
-    dist = scalar(dab[2])
+    dist, n, r1, r2, b0, b1 = fetch_dist_n_r0r1_b0b1(p, soup, c)
 
     if dist < l0: 
         de = scalar(0.5) * k * (l0 - dist) * (l0 - dist)
@@ -98,13 +77,13 @@ class LineSearchGDRbd(LineSearchInterface, PrimalRbd):
     def __init__(self, h, config_file):
         super().__init__(h, config_file)
 
-class GaussNewtonRbd(RbdComplex, ContactSolverBase):
+class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
     def __init__(self, h, config_file):
         super().__init__(h, config_file)
         triplets = Triplets()
-        triplets.rows = wp.zeros((self.n_bodies * 4 + contact_volume * 2,), dtype = int)
+        triplets.rows = wp.zeros((self.n_bodies * 4 + contact_volume * 8,), dtype = int)
         triplets.cols = wp.zeros_like(triplets.rows)
-        triplets.vals = wp.zeros((self.n_bodies * 4 + contact_volume * 2,), dtype = wp.mat33)
+        triplets.vals = wp.zeros((self.n_bodies * 4 + contact_volume * 8,), dtype = wp.mat33)
 
         self.rhs = wp.zeros((self.n_bodies * 2,), dtype = vec3)
         self.du = wp.zeros_like(self.rhs)

@@ -4,7 +4,7 @@ from rbd_simple import RbdComplex, Inertia
 from contact import ContactSolverBase, XConstraint
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult
 from BDF1 import BDFHistory
-from xpbd_contact import forward_states
+from xpbd_contact import forward_states, fetch_dist_n_r0r1_b0b1
 from geometry import Soup
 
 '''
@@ -22,43 +22,14 @@ gravity = -9.8
 def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), dt: scalar):
     i = wp.tid()
     c = xconstraints[i]
-    o = scalar(1.0)
-    z = scalar(0.0)
     k = scalar(stiffness)
     n_bodies = p.shape[0]
+
+    dist, n, r1, r2, b0, b1 = fetch_dist_n_r0r1_b0b1(p, soup, c)
     l0 = c.l0
-    i0 = c.a1a2b1b2[0]
-    i1 = c.a1a2b1b2[1]
-    i2 = c.a1a2b1b2[2]
-    i3 = c.a1a2b1b2[3]
-    
-    b0 = soup.body[i0]
-    b1 = soup.body[i2]
 
-    R0 = Rq(p[b0].nxt.q)
-    R1 = Rq(p[b1].nxt.q)
-    
-    c0 = p[b0].nxt.c
-    c1 = p[b1].nxt.c
-    
-    x0 = R0 @ soup.xcs[i0] + c0
-    x1 = R0 @ soup.xcs[i1] + c0
-    x2 = R1 @ soup.xcs[i2] + c1
-    x3 = R1 @ soup.xcs[i3] + c1
-
-    dab = wp.closest_point_edge_edge(wp.vec3(x0), wp.vec3(x1), wp.vec3(x2), wp.vec3(x3), eps)
-    v0 = wp.lerp(x0, x1, scalar(dab[0]))
-    v1 = wp.lerp(x2, x3, scalar(dab[1]))
-
-    v10 = v0 - v1
-    dist = scalar(dab[2])
-    m1 = mass[b0].m
-
-    if dist < l0: 
-        n = v10 / dist
-        
-        r1 = v0 - c0 
-        r2 = v1 - c1
+    v10 = n * dist
+    if dist < l0:         
         a1 = wp.cross(r1, n)
         a2 = wp.cross(r2, n)
 
