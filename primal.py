@@ -4,7 +4,7 @@ from rbd_simple import RbdComplex, Inertia
 from contact import ContactSolverBase, XConstraint
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult
 from BDF1 import BDFHistory
-from xpbd_contact import forward_states, fetch_dist_n_r0r1_b0b1
+from xpbd_contact import forward_states, fetch_dist_n_r0r1, fetch_b0b1
 from geometry import Soup
 
 '''
@@ -25,7 +25,8 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
     k = scalar(stiffness)
     n_bodies = p.shape[0]
 
-    dist, n, r1, r2, b0, b1 = fetch_dist_n_r0r1_b0b1(p, soup, c)
+    b0, b1 = fetch_b0b1(c, soup)
+    dist, n, r1, r2 = fetch_dist_n_r0r1(p[b0], p[b1], soup, c)
     l0 = c.l0
 
     v10 = n * dist
@@ -94,16 +95,25 @@ def du_kernel(precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), du: 
     i = wp.tid()
     du[i] = wp.cw_div(rhs[i], precond[i])
 
+@wp.func
+def apply_du(du: vec3, dw: vec3, _state: BDFHistory, alpha: scalar, dt: scalar): 
+    state = BDFHistory()
+    state = _state
+    state.nxt.v -= alpha * du 
+    state.nxt.c = state.now.c + dt * state.nxt.v
+    
+    state.nxt.omega -= alpha * dw
+    state.nxt.q = state.now.q + scalar(0.5) * wp.transpose(Gq(state.nxt.q)) @ state.nxt.omega * dt
+    state.nxt.q = wp.normalize(state.nxt.q)
+
+    return state
+
 @wp.kernel
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), alpha: scalar, dt: scalar):
     i = wp.tid()
     n_bodies = history.shape[0]
-    history[i].nxt.v -= alpha * du[i] 
-    history[i].nxt.c = history[i].now.c + dt * history[i].nxt.v
     
-    history[i].nxt.omega -= alpha * du[i + n_bodies]
-    history[i].nxt.q = history[i].now.q + scalar(0.5) * wp.transpose(Gq(history[i].nxt.q)) @ history[i].nxt.omega * dt
-    history[i].nxt.q = wp.normalize(history[i].nxt.q)
+    history[i] = apply_du(du[i], du[i + n_bodies], history[i], alpha, dt)
 
 
 class PrimalRbd(RbdComplex, ContactSolverBase): 
