@@ -80,6 +80,16 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
         wp.atomic_add(rhs, b0 + n_bodies, -tau1)
         wp.atomic_add(rhs, b1 + n_bodies, -tau2)
         
+@wp.func 
+def compute_u_minus_utilde(pi: BDFHistory, dt: scalar): 
+    z = scalar(0.0)
+    u_tilde = pi.now.v + dt * vec3(z, scalar(gravity), z)
+    du = pi.nxt.v - u_tilde
+
+    domega = pi.nxt.omega - pi.now.omega
+
+    return du, domega
+
 @wp.kernel
 def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), dt: scalar):
     '''
@@ -92,11 +102,9 @@ def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia),
     mi = mass[i].m
     if mi > z: 
         Ji = mass[i].J
-        u_tilde = p[i].now.v + dt * vec3(z, scalar(gravity), z)
-        du = p[i].nxt.v - u_tilde
+        du, domega = compute_u_minus_utilde(p[i], dt)
         rhs[i] += mi * du
-
-        rhs[i + n_bodies] += Ji * (p[i].nxt.omega - p[i].now.omega)
+        rhs[i + n_bodies] += Ji * domega
 
         precond[i] = precond[i] * dt * dt + vec3(mi, mi, mi)
         precond[i + n_bodies] = precond[i + n_bodies] * dt * dt + vec3(Ji, Ji, Ji)
@@ -164,21 +172,26 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         wp.launch(forward_states, self.n_bodies, inputs = [self.history, self.dt])
         self.frame += 1
 
+    def line_search(self):
+        self.add_du(self.alpha)
+        return self.alpha
+
     def step(self):
         for ss in range(10):
-            newton = True
-            iter = 0
-            max_iter = 4
-            self.detect_collision()
-            while newton: 
-                self.compute_preconditioner()
-                self.compute_rhs()
-                
-                du_norm = self.compute_du() 
-                self.add_du(self.alpha)
-                iter += 1
-                # print(f"    iter: {iter}, du norm: {du_norm}")
-                newton = not (du_norm < 1e-5 or iter >= max_iter)
+            with wp.ScopedTimer("step"):
+                newton = True
+                iter = 0
+                max_iter = 4
+                self.detect_collision()
+                while newton: 
+                    self.compute_preconditioner()
+                    self.compute_rhs()
+                    
+                    du_norm = self.compute_du() 
+                    alpha = self.line_search()
+                    iter += 1
+                    # print(f"    iter: {iter}, du norm: {du_norm}, alpha = {alpha}")
+                    newton = not (du_norm < 1e-5 or iter >= max_iter)
         
             self.forward_states()
             
