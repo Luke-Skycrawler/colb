@@ -6,6 +6,9 @@ mat44 = wp.mat44d
 vec4 = wp.vec4d
 vec3 = wp.vec3d
 scalar = wp.float64
+
+mat6 = wp.spatial_matrixd
+vec6 = wp.spatial_vectord
 # mat33 = wp.mat33
 # mat44 = wp.mat44
 # vec4 = wp.vec4

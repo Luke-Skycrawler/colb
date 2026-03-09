@@ -2,7 +2,7 @@ import warp as wp
 import numpy as np 
 from rbd_simple import RbdComplex, Inertia 
 from contact import ContactSolverBase, XConstraint
-from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult
+from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult, vec6, mat6
 from BDF1 import BDFHistory
 from xpbd_contact import forward_states, fetch_dist_n_r0r1, fetch_b0b1
 from geometry import Soup
@@ -19,7 +19,7 @@ stiffness = 1e4
 gravity = -9.8
 
 @wp.kernel
-def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), precond: wp.array(dtype = mat33), rhs: wp.array(dtype = vec3), dt: scalar):
+def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), precond: wp.array(dtype = mat6), rhs: wp.array(dtype = vec3), dt: scalar):
     i = wp.tid()
     c = xconstraints[i]
     k = scalar(stiffness)
@@ -38,14 +38,27 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
         
         # dpq1 = wp.cw_mul(a1, a1)
         # dpq2 = wp.cw_mul(a2, a2)
-        dpx12 = wp.outer(n, n)
-        dpq1 = wp.outer(a1, a1)
-        dpq2 = wp.outer(a2, a2)
+        # dpx12 = wp.outer(n, n)
+        # dpq1 = wp.outer(a1, a1)
+        # dpq2 = wp.outer(a2, a2)
 
-        wp.atomic_add(precond, b0 * 2, dpx12 * k)
-        wp.atomic_add(precond, b1 * 2, dpx12 * k)
-        wp.atomic_add(precond, b0 * 2 + 1, dpq1 * k)
-        wp.atomic_add(precond, b1 * 2 + 1, dpq2 * k)
+        j1 = vec6(
+            n[0], n[1], n[2], a1[0], a1[1], a1[2]
+        )
+        j2 = vec6(
+            -n[0], -n[1], -n[2], -a2[0], -a2[1], -a2[2]
+        )
+        
+        dj1 = k * wp.outer(j1, j1)
+        dj2 = k * wp.outer(j2, j2)
+
+        # wp.atomic_add(precond, b0 * 2, dpx12 * k)
+        # wp.atomic_add(precond, b1 * 2, dpx12 * k)
+        # wp.atomic_add(precond, b0 * 2 + 1, dpq1 * k)
+        # wp.atomic_add(precond, b1 * 2 + 1, dpq2 * k)
+
+        wp.atomic_add(precond, b0, dj1)
+        wp.atomic_add(precond, b1, dj2)
         
         f1 = k * (l0 - dist) * n * dt
         tau1 = wp.cross(r1, f1) 
@@ -66,13 +79,14 @@ def compute_u_minus_utilde(pi: BDFHistory, dt: scalar):
     return du, domega
 
 @wp.kernel
-def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), precond: wp.array(dtype = mat33), rhs: wp.array(dtype = vec3), dt: scalar):
+def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), precond: wp.array(dtype = mat6), rhs: wp.array(dtype = vec3), dt: scalar):
     '''
     adds the mass term of Eq. (4)
     rhs should contain the force term before this kernel is called
     '''
     i = wp.tid()
     # n_bodies = p.shape[0]
+    o = scalar(1.0)
     z = scalar(0.0)
     mi = mass[i].m
     if mi > z: 
@@ -83,25 +97,72 @@ def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia),
 
         # precond[i] = precond[i] * dt * dt + vec3(mi, mi, mi)
         # precond[i + n_bodies] = precond[i + n_bodies] * dt * dt + vec3(Ji, Ji, Ji)
-        precond[i * 2] = precond[i * 2] * dt * dt + wp.diag(vec3(mi))
-        precond[i * 2 + 1] = precond[i * 2 + 1] * dt * dt + wp.diag(vec3(Ji))
-
+        # precond[i * 2] = precond[i * 2] * dt * dt + wp.diag(vec3(mi))
+        # precond[i * 2 + 1] = precond[i * 2 + 1] * dt * dt + wp.diag(vec3(Ji))
+        precond[i] = precond[i] * dt * dt + wp.diag(vec6(mi, mi, mi, Ji, Ji, Ji))
     else:
         # precond[i] = vec3(scalar(1.0))
         # precond[i + n_bodies] = vec3(scalar(1.0))
-        precond[i * 2] = wp.diag(vec3(scalar(1.0)))
-        precond[i * 2 + 1] = wp.diag(vec3(scalar(1.0)))
+        # precond[i * 2] = wp.diag(vec3(scalar(1.0)))
+        # precond[i * 2 + 1] = wp.diag(vec3(scalar(1.0)))
+        precond[i] = wp.diag(vec6(o, o, o, o, o, o))
 
         rhs[i * 2] = vec3(z)
         rhs[i * 2 + 1] = vec3(z)
         
         
-    
+@wp.func 
+def ldlt(A: wp.spatial_matrixd, b: wp.spatial_vectord):
+    '''
+    computes Ax = b using LDLT factorization 
+    args:   A: 6x6 matrix
+            b: 6D vector
+    '''
+
+    z = scalar(0.0)
+    L = wp.matrix(z, shape = (6, 6), dtype = scalar)
+
+    # --- Cholesky factorization ---
+    for i in range(6):
+        for j in range(i + 1):
+            s = A[i, j]
+            for k in range(j):
+                s -= L[i, k] * L[j, k]
+            if i == j:
+                L[i, j] = wp.sqrt(s)
+            else:
+                L[i, j] = s / L[j, j]
+
+    # --- Forward substitution Ly = b ---
+    y = wp.vector(z, length = 6, dtype = scalar)
+
+    for i in range(6):
+        s = b[i]
+        for j in range(i):
+            s -= L[i, j] * y[j]
+        y[i] = s / L[i, i]
+
+    # --- Back substitution Lᵀx = y ---
+    x = wp.vector(z, length = 6, dtype = scalar)
+
+    for i in range(5, -1, -1):
+        s = y[i]
+        for j in range(i + 1, 6):
+            s -= L[j, i] * x[j]
+        x[i] = s / L[i, i]
+
+    return x
+
 @wp.kernel
-def du_kernel(precond: wp.array(dtype = mat33), rhs: wp.array(dtype = vec3), du: wp.array(dtype = vec3)):
+def du_kernel(precond: wp.array(dtype = mat6), rhs: wp.array(dtype = vec3), du: wp.array(dtype = vec3)):
     i = wp.tid()
     # du[i] = wp.cw_div(rhs[i], precond[i])
-    du[i] = wp.inverse(precond[i]) @ rhs[i]
+    # du[i] = wp.inverse(precond[i]) @ rhs[i]
+    y = vec6(rhs[i * 2][0], rhs[i * 2][1], rhs[i * 2][2], rhs[i * 2 + 1][0], rhs[i * 2 + 1][1], rhs[i * 2 + 1][2])
+    x = ldlt(precond[i], y)
+    du[i * 2] = vec3(x[0], x[1], x[2])
+    du[i * 2 + 1] = vec3(x[3], x[4], x[5])
+    
 
 @wp.func
 def apply_du(du: vec3, dw: vec3, _state: BDFHistory, alpha: scalar, dt: scalar): 
@@ -129,7 +190,8 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         RbdComplex.__init__(self, h, config_file)        
         ContactSolverBase.__init__(self)
         self.alpha = 0.5
-        self.precond = wp.zeros((self.n_bodies * 2,), dtype = mat33)
+        # self.precond = wp.zeros((self.n_bodies * 2,), dtype = mat33)
+        self.precond = wp.zeros((self.n_bodies,), dtype = mat6)
         self.rhs = wp.zeros((self.n_bodies * 2,), dtype = vec3)
         self.du = wp.zeros_like(self.rhs)
 
@@ -150,7 +212,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         wp.launch(rhs_kernel, dim = (self.n_bodies, ), inputs = [self.history, self.inertia, self.precond, self.rhs, self.dt])
 
     def compute_du(self): 
-        wp.launch(du_kernel, dim = self.n_bodies * 2, inputs = [self.precond, self.rhs, self.du])
+        wp.launch(du_kernel, dim = self.n_bodies, inputs = [self.precond, self.rhs, self.du])
 
         # return np.max(np.abs(self.du.numpy()))
         return 1.0
@@ -171,7 +233,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
             with wp.ScopedTimer("step"):
                 newton = True
                 iter = 0
-                max_iter = 4
+                max_iter = 8
                 self.detect_collision()
                 while newton: 
                     self.compute_preconditioner()
