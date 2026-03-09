@@ -4,7 +4,7 @@ from viewer import PSViewer
 from utils.scene import JSONComplex
 from xpbd_contact import XPBDRbd
 from primal import PrimalRbd
-from vbd import VBDRbd
+from vbd import VBDRbd, GSPrimalRbd
 from gauss_newton import LineSearchGDRbd
 
 def free_float():
@@ -14,8 +14,9 @@ def free_float():
     wp.init()
     dt = 2e-3
     # rbd = XPBDRbd(dt, "assets/chains.json")
-    rbd = PrimalRbd(dt, "assets/chains.json")
+    # rbd = PrimalRbd(dt, "assets/chains.json")
     # rbd = VBDRbd(dt, "assets/chains.json")
+    rbd = GSPrimalRbd(dt, "assets/chains.json")
     # rbd = LineSearchGDRbd(dt, "assets/chains.json")
 
     viewer = PSViewer(rbd)

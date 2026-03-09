@@ -23,7 +23,7 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
     i = wp.tid()
     c = xconstraints[i]
     k = scalar(stiffness)
-    n_bodies = p.shape[0]
+    # n_bodies = p.shape[0]
 
     b0, b1 = fetch_b0b1(c, soup)
     dist, n, r1, r2 = fetch_dist_n_r0r1(p[b0], p[b1], soup, c)
@@ -42,18 +42,18 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
         dpq1 = wp.outer(a1, a1)
         dpq2 = wp.outer(a2, a2)
 
-        wp.atomic_add(precond, b0, dpx12 * k)
-        wp.atomic_add(precond, b1, dpx12 * k)
-        wp.atomic_add(precond, b0 + n_bodies, dpq1 * k)
-        wp.atomic_add(precond, b1 + n_bodies, dpq2 * k)
+        wp.atomic_add(precond, b0 * 2, dpx12 * k)
+        wp.atomic_add(precond, b1 * 2, dpx12 * k)
+        wp.atomic_add(precond, b0 * 2 + 1, dpq1 * k)
+        wp.atomic_add(precond, b1 * 2 + 1, dpq2 * k)
         
         f1 = k * (l0 - dist) * n * dt
         tau1 = wp.cross(r1, f1) 
         tau2 = wp.cross(r2, -f1)
-        wp.atomic_add(rhs, b0, -f1)
-        wp.atomic_add(rhs, b1, f1)
-        wp.atomic_add(rhs, b0 + n_bodies, -tau1)
-        wp.atomic_add(rhs, b1 + n_bodies, -tau2)
+        wp.atomic_add(rhs, b0 * 2, -f1)
+        wp.atomic_add(rhs, b1 * 2, f1)
+        wp.atomic_add(rhs, b0 * 2 + 1, -tau1)
+        wp.atomic_add(rhs, b1 * 2 + 1, -tau2)
         
 @wp.func 
 def compute_u_minus_utilde(pi: BDFHistory, dt: scalar): 
@@ -72,28 +72,28 @@ def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia),
     rhs should contain the force term before this kernel is called
     '''
     i = wp.tid()
-    n_bodies = p.shape[0]
+    # n_bodies = p.shape[0]
     z = scalar(0.0)
     mi = mass[i].m
     if mi > z: 
         Ji = mass[i].J
         du, domega = compute_u_minus_utilde(p[i], dt)
-        rhs[i] += mi * du
-        rhs[i + n_bodies] += Ji * domega
+        rhs[i * 2] += mi * du
+        rhs[i * 2 + 1] += Ji * domega
 
         # precond[i] = precond[i] * dt * dt + vec3(mi, mi, mi)
         # precond[i + n_bodies] = precond[i + n_bodies] * dt * dt + vec3(Ji, Ji, Ji)
-        precond[i] = precond[i] * dt * dt + wp.diag(vec3(mi))
-        precond[i + n_bodies] = precond[i + n_bodies] * dt * dt + wp.diag(vec3(Ji))
+        precond[i * 2] = precond[i * 2] * dt * dt + wp.diag(vec3(mi))
+        precond[i * 2 + 1] = precond[i * 2 + 1] * dt * dt + wp.diag(vec3(Ji))
 
     else:
         # precond[i] = vec3(scalar(1.0))
         # precond[i + n_bodies] = vec3(scalar(1.0))
-        precond[i] = wp.diag(vec3(scalar(1.0)))
-        precond[i + n_bodies] = wp.diag(vec3(scalar(1.0)))
+        precond[i * 2] = wp.diag(vec3(scalar(1.0)))
+        precond[i * 2 + 1] = wp.diag(vec3(scalar(1.0)))
 
-        rhs[i] = vec3(z)
-        rhs[i + n_bodies] = vec3(z)
+        rhs[i * 2] = vec3(z)
+        rhs[i * 2 + 1] = vec3(z)
         
         
     
@@ -119,9 +119,9 @@ def apply_du(du: vec3, dw: vec3, _state: BDFHistory, alpha: scalar, dt: scalar):
 @wp.kernel
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), alpha: scalar, dt: scalar):
     i = wp.tid()
-    n_bodies = history.shape[0]
+    # n_bodies = history.shape[0]
     
-    history[i] = apply_du(du[i], du[i + n_bodies], history[i], alpha, dt)
+    history[i] = apply_du(du[i * 2], du[i * 2 + 1], history[i], alpha, dt)
 
 
 class PrimalRbd(RbdComplex, ContactSolverBase): 

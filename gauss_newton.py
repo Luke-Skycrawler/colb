@@ -33,7 +33,7 @@ def uTMu_batch(history: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Ine
     pow2 = scalar(pow2i)
     alpha = wp.pow(scalar(0.5), pow2)
 
-    history_i = apply_du(du_arr[i], du_arr[i + n_bodies], history[i], alpha, dt)
+    history_i = apply_du(du_arr[i * 2], du_arr[i * 2 + 1], history[i], alpha, dt)
 
     du, domega = compute_u_minus_utilde(history_i, dt)
     mi = mass[i].m
@@ -69,8 +69,8 @@ def contact_energy_batch(p: wp.array(dtype = BDFHistory), soup: Soup, xconstrain
     l0 = c.l0
     b0, b1 = fetch_b0b1(c, soup)
     
-    p0 = apply_du(du[b0], du[b0 + n_bodies], p[b0], alpha, dt)
-    p1 = apply_du(du[b1], du[b1 + n_bodies], p[b1], alpha, dt)
+    p0 = apply_du(du[b0 * 2], du[b0 * 2 + 1], p[b0], alpha, dt)
+    p1 = apply_du(du[b1 * 2], du[b1 * 2 + 1], p[b1], alpha, dt)
     dist, n, r1, r2 = fetch_dist_n_r0r1(p0, p1, soup, c)
     
     dl = wp.max(scalar(0.0), l0 - dist)

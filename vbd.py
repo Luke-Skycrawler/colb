@@ -11,12 +11,12 @@ from geometry import Soup
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), alpha: scalar, dt: scalar, color: int, colors: wp.array(dtype = int)):
     i = wp.tid()
     c = colors[i]
-    n_bodies = history.shape[0]
+    # n_bodies = history.shape[0]
     if c == color:
-        history[i].nxt.v -= alpha * du[i] 
+        history[i].nxt.v -= alpha * du[i * 2] 
         history[i].nxt.c = history[i].now.c + dt * history[i].nxt.v
         
-        history[i].nxt.omega -= alpha * du[i + n_bodies]
+        history[i].nxt.omega -= alpha * du[i * 2 + 1]
         history[i].nxt.q = history[i].now.q + scalar(0.5) * wp.transpose(Gq(history[i].nxt.q)) @ history[i].nxt.omega * dt
         history[i].nxt.q = wp.normalize(history[i].nxt.q)
 
