@@ -19,7 +19,7 @@ stiffness = 1e4
 gravity = -9.8
 
 @wp.kernel
-def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), dt: scalar):
+def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), precond: wp.array(dtype = mat33), rhs: wp.array(dtype = vec3), dt: scalar):
     i = wp.tid()
     c = xconstraints[i]
     k = scalar(stiffness)
@@ -34,10 +34,13 @@ def preconditioner_diag_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(d
         a1 = wp.cross(r1, n)
         a2 = wp.cross(r2, n)
 
-        dpx12 = wp.cw_mul(n, n)
+        # dpx12 = wp.cw_mul(n, n)
         
-        dpq1 = wp.cw_mul(a1, a1)
-        dpq2 = wp.cw_mul(a2, a2)
+        # dpq1 = wp.cw_mul(a1, a1)
+        # dpq2 = wp.cw_mul(a2, a2)
+        dpx12 = wp.outer(n, n)
+        dpq1 = wp.outer(a1, a1)
+        dpq2 = wp.outer(a2, a2)
 
         wp.atomic_add(precond, b0, dpx12 * k)
         wp.atomic_add(precond, b1, dpx12 * k)
@@ -63,7 +66,7 @@ def compute_u_minus_utilde(pi: BDFHistory, dt: scalar):
     return du, domega
 
 @wp.kernel
-def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), dt: scalar):
+def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), precond: wp.array(dtype = mat33), rhs: wp.array(dtype = vec3), dt: scalar):
     '''
     adds the mass term of Eq. (4)
     rhs should contain the force term before this kernel is called
@@ -78,12 +81,16 @@ def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia),
         rhs[i] += mi * du
         rhs[i + n_bodies] += Ji * domega
 
-        precond[i] = precond[i] * dt * dt + vec3(mi, mi, mi)
-        precond[i + n_bodies] = precond[i + n_bodies] * dt * dt + vec3(Ji, Ji, Ji)
+        # precond[i] = precond[i] * dt * dt + vec3(mi, mi, mi)
+        # precond[i + n_bodies] = precond[i + n_bodies] * dt * dt + vec3(Ji, Ji, Ji)
+        precond[i] = precond[i] * dt * dt + wp.diag(vec3(mi))
+        precond[i + n_bodies] = precond[i + n_bodies] * dt * dt + wp.diag(vec3(Ji))
 
     else:
-        precond[i] = vec3(scalar(1.0))
-        precond[i + n_bodies] = vec3(scalar(1.0))
+        # precond[i] = vec3(scalar(1.0))
+        # precond[i + n_bodies] = vec3(scalar(1.0))
+        precond[i] = wp.diag(vec3(scalar(1.0)))
+        precond[i + n_bodies] = wp.diag(vec3(scalar(1.0)))
 
         rhs[i] = vec3(z)
         rhs[i + n_bodies] = vec3(z)
@@ -91,9 +98,10 @@ def rhs_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia),
         
     
 @wp.kernel
-def du_kernel(precond: wp.array(dtype = vec3), rhs: wp.array(dtype = vec3), du: wp.array(dtype = vec3)):
+def du_kernel(precond: wp.array(dtype = mat33), rhs: wp.array(dtype = vec3), du: wp.array(dtype = vec3)):
     i = wp.tid()
-    du[i] = wp.cw_div(rhs[i], precond[i])
+    # du[i] = wp.cw_div(rhs[i], precond[i])
+    du[i] = wp.inverse(precond[i]) @ rhs[i]
 
 @wp.func
 def apply_du(du: vec3, dw: vec3, _state: BDFHistory, alpha: scalar, dt: scalar): 
@@ -121,9 +129,9 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         RbdComplex.__init__(self, h, config_file)        
         ContactSolverBase.__init__(self)
         self.alpha = 0.5
-        self.precond = wp.zeros((self.n_bodies * 2,), dtype = vec3)
-        self.rhs = wp.zeros_like(self.precond)
-        self.du = wp.zeros_like(self.precond)
+        self.precond = wp.zeros((self.n_bodies * 2,), dtype = mat33)
+        self.rhs = wp.zeros((self.n_bodies * 2,), dtype = vec3)
+        self.du = wp.zeros_like(self.rhs)
 
     def compute_J(self):
         pass
@@ -144,7 +152,8 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
     def compute_du(self): 
         wp.launch(du_kernel, dim = self.n_bodies * 2, inputs = [self.precond, self.rhs, self.du])
 
-        return np.max(np.abs(self.du.numpy()))
+        # return np.max(np.abs(self.du.numpy()))
+        return 1.0
 
     def add_du(self, alpha): 
         wp.launch(add_du_kernel, dim = (self.n_bodies,), inputs = [self.du, self.history, alpha, self.dt])

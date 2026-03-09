@@ -14,8 +14,8 @@ def free_float():
     wp.init()
     dt = 2e-3
     # rbd = XPBDRbd(dt, "assets/chains.json")
-    # rbd = PrimalRbd(dt, "assets/chains.json")
-    rbd = VBDRbd(dt, "assets/chains.json")
+    rbd = PrimalRbd(dt, "assets/chains.json")
+    # rbd = VBDRbd(dt, "assets/chains.json")
     # rbd = LineSearchGDRbd(dt, "assets/chains.json")
 
     viewer = PSViewer(rbd)

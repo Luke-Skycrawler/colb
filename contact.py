@@ -198,7 +198,6 @@ class ContactSolverBase:
         n_edges = self.soup.edges.shape[0] // 2
         
         wp.launch(edge_edge_collision, n_edges, inputs = [self.bvh_edges.id, self.soup.x_transformed, self.soup.edges, self.contacts_new, thickness])
-        wp.synchronize()
         self.n_contacts = self.contacts_new.cnt.numpy()[0]
         # print(f"n contacts = {self.n_contacts}")
         # print(self.contacts.list.numpy()["a1a2b1b2"][:self.n_contacts])
