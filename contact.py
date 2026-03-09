@@ -3,7 +3,7 @@ from viewer import PSViewer
 import polyscope as ps
 import numpy as np 
 thickness = 0.0475
-contact_volume = 2048
+contact_volume = 4096
 from quat_util import vec3, vec4, mat33, mat44, scalar
 from geometry import Soup
 
@@ -96,7 +96,7 @@ def edge_edge_collision(bvh: wp.uint64, x: wp.array(dtype = vec3), edges: wp.arr
                 q2 = wp.vec3(x[b2])
                 std = wp.closest_point_edge_edge(p1, p2, q1, q2, 1e-6)
                 dist = std[2]
-                if dist < thickness * 2.5:
+                if dist < thickness * 4.0:
                     append(contacts, a1, a2, b1, b2)
 
 @wp.func 
@@ -170,7 +170,7 @@ class ContactSolverBase:
     
     def compute_edge_aabbs(self):
         n_edges = self.soup.edges.shape[0] // 2
-        wp.launch(edge_aabb, n_edges, inputs = [self.soup.x_transformed, self.soup.edges, self.bvh_edges_lower, self.bvh_edges_upper, thickness * 2.0])
+        wp.launch(edge_aabb, n_edges, inputs = [self.soup.x_transformed, self.soup.edges, self.bvh_edges_lower, self.bvh_edges_upper, thickness])
 
     def colorization(self):
         n_nodes = self.soup.xcs.shape[0]
