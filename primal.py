@@ -15,7 +15,7 @@ reference
 '''
 
 eps = 1e-6
-stiffness = 1e4
+stiffness = 4e4
 gravity = -9.8
 
 @wp.kernel
