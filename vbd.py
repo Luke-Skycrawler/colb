@@ -50,7 +50,7 @@ class VBDRbd(PrimalRbd):
         for ss in range(10):
             newton = True
             iter = 0
-            max_iter = 8
+            max_iter = 16
             self.detect_collision()
             while newton: 
                 for color in range(3):

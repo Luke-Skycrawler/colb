@@ -2,10 +2,11 @@ import warp as wp
 from viewer import PSViewer
 import polyscope as ps
 import numpy as np 
-thickness = 0.0475
-contact_volume = 4096
 from quat_util import vec3, vec4, mat33, mat44, scalar
 from geometry import Soup
+thickness = 0.0475
+contact_volume = 4096
+buffer = 0.01
 
 '''
 TODO: make sure max_unroll = 0 before importing this module
@@ -81,8 +82,8 @@ def edge_edge_collision(bvh: wp.uint64, x: wp.array(dtype = vec3), edges: wp.arr
         p1 = wp.vec3(x[a1])
         p2 = wp.vec3(x[a2])
 
-        low = wp.min(p1, p2) - wp.vec3(thickness)
-        high = wp.max(p1, p2) + wp.vec3(thickness)
+        low = wp.min(p1, p2) - wp.vec3(thickness + buffer)
+        high = wp.max(p1, p2) + wp.vec3(thickness + buffer)
         query = wp.bvh_query_aabb(bvh, low, high)
         j = int(0) 
         while wp.bvh_query_next(query, j):
@@ -170,7 +171,7 @@ class ContactSolverBase:
     
     def compute_edge_aabbs(self):
         n_edges = self.soup.edges.shape[0] // 2
-        wp.launch(edge_aabb, n_edges, inputs = [self.soup.x_transformed, self.soup.edges, self.bvh_edges_lower, self.bvh_edges_upper, thickness])
+        wp.launch(edge_aabb, n_edges, inputs = [self.soup.x_transformed, self.soup.edges, self.bvh_edges_lower, self.bvh_edges_upper, thickness + buffer])
 
     def colorization(self):
         n_nodes = self.soup.xcs.shape[0]

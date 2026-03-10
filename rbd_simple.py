@@ -4,7 +4,7 @@ from BDF1 import BDFHistory
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq
 from utils.scene import JSONComplex
 from geometry import Soup
-length = scalar(0.2)
+length = scalar(0.4)
 
 @wp.struct 
 class Inertia: 

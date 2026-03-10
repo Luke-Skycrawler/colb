@@ -28,9 +28,9 @@ Tested on RTX 3080.
 | method                            | real time  | sim time | iterations | early termination | 
 |---|---|---|---|---|
 | xpbd                              |~ 1ms    | 2ms       | 2          | true |
-| preconditioned gradient descent   | ~1ms    | 4ms       | 8          | true |
-|PGD (w/ line search)               | ~2ms     | 4ms       | 4          | true |
-|vbd                                | ~4ms     | 4ms        | 8         | true |
+| preconditioned gradient descent   | ~2ms    | 8ms       | 16          | true |
+|PGD (w/ line search)               | ~5ms     | 8ms       | 16          | true |
+|vbd                                | ~5ms     | 8ms        | 16         | true |
 #### Reference
 
 [1]: Detailed Rigid Body Simulation with Extended Position Based Dynamics

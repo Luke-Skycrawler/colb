@@ -233,7 +233,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
             with wp.ScopedTimer("step"):
                 newton = True
                 iter = 0
-                max_iter = 8
+                max_iter = 16
                 self.detect_collision()
                 while newton: 
                     self.compute_preconditioner()
