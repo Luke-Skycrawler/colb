@@ -12,7 +12,7 @@ def free_float():
     wp.config.max_unroll = 0
     wp.config.enable_backward = False
     wp.init()
-    dt = 8e-3
+    dt = 16e-3
     # rbd = XPBDRbd(dt, "assets/chains.json")
     rbd = PrimalRbd(dt, "assets/chains.json")
     # rbd = VBDRbd(dt, "assets/chains.json")

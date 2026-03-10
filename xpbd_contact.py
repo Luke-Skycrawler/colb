@@ -2,7 +2,7 @@ import warp as wp
 from geometry import Soup
 from BDF1 import BDFHistory
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult
-from contact import ContactSolverBase, XConstraint
+from contact import ContactSolverBase, XConstraint, fetch_b0b1, fetch_dist_n_r0r1
 from rbd_simple import RbdComplex, Inertia
 
 '''
@@ -17,52 +17,6 @@ class RBDDelta:
     dx: wp.array(dtype = vec3)
     dq: wp.array(dtype = vec4)
     cnt: wp.array(dtype = int)
-
-@wp.func
-def fetch_b0b1(c: XConstraint, soup: Soup):
-    i0 = c.a1a2b1b2[0]
-    i2 = c.a1a2b1b2[2]
-    
-    b0 = soup.body[i0]
-    b1 = soup.body[i2]
-
-    return b0, b1
-
-@wp.func 
-def fetch_dist_n_r0r1(p0: BDFHistory, p1: BDFHistory, soup: Soup, c: XConstraint):
-    l0 = c.l0
-    i0 = c.a1a2b1b2[0]
-    i1 = c.a1a2b1b2[1]
-    i2 = c.a1a2b1b2[2]
-    i3 = c.a1a2b1b2[3]
-    
-    b0 = soup.body[i0]
-    b1 = soup.body[i2]
-
-    R0 = Rq(p0.nxt.q)
-    R1 = Rq(p1.nxt.q)
-    
-    c0 = p0.nxt.c
-    c1 = p1.nxt.c
-    
-    x0 = R0 @ soup.xcs[i0] + c0
-    x1 = R0 @ soup.xcs[i1] + c0
-    x2 = R1 @ soup.xcs[i2] + c1
-    x3 = R1 @ soup.xcs[i3] + c1
-
-    dab = wp.closest_point_edge_edge(wp.vec3(x0), wp.vec3(x1), wp.vec3(x2), wp.vec3(x3), eps)
-    v0 = wp.lerp(x0, x1, scalar(dab[0]))
-    v1 = wp.lerp(x2, x3, scalar(dab[1]))
-
-    v10 = v0 - v1
-    dist = scalar(dab[2])
-
-    n = v10 / dist
-    
-    r1 = v0 - c0 
-    r2 = v1 - c1
-
-    return dist, n, r1, r2
 
 
 @wp.kernel

@@ -2,11 +2,14 @@ import warp as wp
 from viewer import PSViewer
 import polyscope as ps
 import numpy as np 
-from quat_util import vec3, vec4, mat33, mat44, scalar
+from quat_util import vec3, vec4, mat33, mat44, scalar, Rq
 from geometry import Soup
+from BDF1 import BDFHistory
+
 thickness = 0.0475
-contact_volume = 4096
-buffer = 0.01
+contact_volume = 8192
+buffer = thickness
+eps = 1e-6
 
 '''
 TODO: make sure max_unroll = 0 before importing this module
@@ -54,6 +57,66 @@ class Contacts:
     cnt: wp.array(dtype = int)
     htable: wp.array(dtype = int)
 
+@wp.struct 
+class ContactRet:
+    points: wp.array(dtype = vec3)
+    dists: wp.array(dtype = scalar)
+
+@wp.func
+def fetch_b0b1(c: XConstraint, soup: Soup):
+    i0 = c.a1a2b1b2[0]
+    i2 = c.a1a2b1b2[2]
+    
+    b0 = soup.body[i0]
+    b1 = soup.body[i2]
+
+    return b0, b1
+
+@wp.func 
+def fetch_dist_n_r0r1(p0: BDFHistory, p1: BDFHistory, soup: Soup, c: XConstraint):
+    l0 = c.l0
+    i0 = c.a1a2b1b2[0]
+    i1 = c.a1a2b1b2[1]
+    i2 = c.a1a2b1b2[2]
+    i3 = c.a1a2b1b2[3]
+    
+    b0 = soup.body[i0]
+    b1 = soup.body[i2]
+
+    R0 = Rq(p0.nxt.q)
+    R1 = Rq(p1.nxt.q)
+    
+    c0 = p0.nxt.c
+    c1 = p1.nxt.c
+    
+    x0 = R0 @ soup.xcs[i0] + c0
+    x1 = R0 @ soup.xcs[i1] + c0
+    x2 = R1 @ soup.xcs[i2] + c1
+    x3 = R1 @ soup.xcs[i3] + c1
+
+    dab = wp.closest_point_edge_edge(wp.vec3(x0), wp.vec3(x1), wp.vec3(x2), wp.vec3(x3), eps)
+    v0 = wp.lerp(x0, x1, scalar(dab[0]))
+    v1 = wp.lerp(x2, x3, scalar(dab[1]))
+
+    v10 = v0 - v1
+    dist = scalar(dab[2])
+
+    n = v10 / dist
+    
+    r1 = v0 - c0 
+    r2 = v1 - c1
+
+    return dist, n, r1, r2
+
+@wp.kernel
+def get_contact_points(p: wp.array(dtype = BDFHistory), soup: Soup, xconstraints: wp.array(dtype = XConstraint), contact_ret: ContactRet):
+    i = wp.tid()
+    c = xconstraints[i]
+    b0, b1 = fetch_b0b1(c, soup)
+    dist, n, r1, r2 = fetch_dist_n_r0r1(p[b0], p[b1], soup, c)
+    contact_ret.points[i] = (p[b0].nxt.c + r1 + p[b1].nxt.c + r2) * scalar(0.5)
+    contact_ret.dists[i] = dist
+
 @wp.func
 def _hash(a1: int, b1: int) -> int:
     '''
@@ -97,7 +160,7 @@ def edge_edge_collision(bvh: wp.uint64, x: wp.array(dtype = vec3), edges: wp.arr
                 q2 = wp.vec3(x[b2])
                 std = wp.closest_point_edge_edge(p1, p2, q1, q2, 1e-6)
                 dist = std[2]
-                if dist < thickness * 4.0:
+                if dist < (thickness + buffer) * 2.0:
                     append(contacts, a1, a2, b1, b2)
 
 @wp.func 
@@ -142,20 +205,11 @@ class ContactSolverBase:
         self.dirty_bit = wp.zeros((n_nodes, ), dtype = bool)
 
 
-        # contacts 
-        self.contacts_list = wp.zeros((contact_volume,), dtype = ContactInfo)
-        self.contacts_cnt = wp.zeros((1,), dtype = int)
-        self.contacts_htable = wp.zeros((8191,), dtype = int)
-        self.contacts = Contacts()
 
         self.contacts_list_new = wp.zeros((contact_volume,), dtype = ContactInfo)
         self.contacts_cnt_new = wp.zeros((1,), dtype = int)
         self.contacts_htable_new = wp.zeros((8191,), dtype = int)
         self.contacts_new = Contacts()
-
-        self.contacts.list = self.contacts_list
-        self.contacts.cnt = self.contacts_cnt
-        self.contacts.htable = self.contacts_htable
 
         self.contacts_new.list = self.contacts_list_new
         self.contacts_new.cnt = self.contacts_cnt_new
@@ -163,6 +217,9 @@ class ContactSolverBase:
 
         self.n_contacts = 0
 
+        self.contact_ret = ContactRet()
+        self.contact_ret.points = wp.zeros((contact_volume,), dtype = vec3)
+        self.contact_ret.dists = wp.zeros((contact_volume,), dtype = scalar)
 
 
     def update_bvh(self):
@@ -202,3 +259,13 @@ class ContactSolverBase:
         self.n_contacts = self.contacts_new.cnt.numpy()[0]
         # print(f"n contacts = {self.n_contacts}")
         # print(self.contacts.list.numpy()["a1a2b1b2"][:self.n_contacts])
+
+    def get_contact_points(self):
+        wp.launch(get_contact_points, (self.n_contacts,), inputs = [self.history, self.soup, self.contacts_new.list, self.contact_ret])
+        # filter d > 2 * thickness
+        dists = self.contact_ret.dists.numpy()[:self.n_contacts]
+        points = self.contact_ret.points.numpy()[:self.n_contacts]
+        
+        valid = dists < thickness * 2.0
+        magnitudes = np.abs(dists[valid] - thickness * 2.0)
+        return points[valid], magnitudes

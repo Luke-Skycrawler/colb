@@ -44,6 +44,11 @@ class PSViewer:
         if self.animate: 
             self.rbd.step()
             self.V = self.rbd.compute_V()
+            contact_points, magnitudes = self.rbd.get_contact_points()
+            contacts = ps.register_point_cloud("contact points", contact_points, color = (1.0, 0.0, 0.0))
+            if len(contact_points) > 0:
+                contacts.add_scalar_quantity("magnitude", magnitudes * 20.0)
+                contacts.set_point_radius_quantity("magnitude", autoscale = False)
             # self.ps_mesh.update_vertex_positions(self.V)
             self.ps_medial.update_node_positions(self.V)
             self.frame = self.rbd.frame

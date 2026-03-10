@@ -1,7 +1,7 @@
 import warp as wp 
 import numpy as np 
 from rbd_simple import RbdComplex, Inertia 
-from contact import ContactSolverBase, XConstraint
+from contact import ContactSolverBase, XConstraint, ContactRet, thickness
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult, vec6, mat6
 from BDF1 import BDFHistory
 from xpbd_contact import forward_states, fetch_dist_n_r0r1, fetch_b0b1
@@ -229,7 +229,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         return self.alpha
 
     def step(self):
-        for ss in range(10):
+        for ss in range(1):
             with wp.ScopedTimer("step"):
                 newton = True
                 iter = 0
