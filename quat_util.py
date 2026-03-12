@@ -1,19 +1,7 @@
 import numpy as np 
 import warp as wp 
 
-mat33 = wp.mat33d
-mat44 = wp.mat44d
-vec4 = wp.vec4d
-vec3 = wp.vec3d
-scalar = wp.float64
-
-mat6 = wp.spatial_matrixd
-vec6 = wp.spatial_vectord
-# mat33 = wp.mat33
-# mat44 = wp.mat44
-# vec4 = wp.vec4
-# vec3 = wp.vec3
-# scalar = float
+from scalar_types import *
 
 @wp.func 
 def Gq(q: vec4):

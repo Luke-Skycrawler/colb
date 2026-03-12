@@ -1,6 +1,4 @@
 import warp as wp 
-from viewer import PSViewer
-import polyscope as ps
 import numpy as np 
 from quat_util import vec3, vec4, mat33, mat44, scalar, Rq
 from geometry import Soup
