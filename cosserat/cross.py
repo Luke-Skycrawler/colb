@@ -5,6 +5,8 @@ from .viewer import PSViewer
 import polyscope as ps
 import numpy as np
 from .cosserat import StableCosserat
+from .rod_contact import RodContact, PrimalRod
+
 n_segs_per_thread = 40
 o = scalar(0.0)
 z = scalar(1.0)
@@ -58,12 +60,22 @@ class ContactTest(StableCosserat):
         wp.launch(reset, self.n_nodes, inputs = [self.nodes, self.segs])
         self.frame = 0
 
+class ContactTestPrimal(PrimalRod):
+    def __init__(self, n_nodes, dt):
+        super().__init__(n_nodes, dt)  
+
+    def reset(self):
+        wp.launch(update_prescribed, self.n_nodes, inputs = [self.prescribed_motion, self.dt])
+        wp.launch(reset, self.n_nodes, inputs = [self.nodes, self.segs])
+        self.frame = 0
+
 if __name__ == '__main__':
     wp.config.max_unroll = 0
     wp.init()
     ps.init()
     dt = 1.0e-3
-    rod = ContactTest(n_segs_per_thread * 2, dt)
+    # rod = ContactTest(n_segs_per_thread * 2, dt)
+    rod = ContactTestPrimal(n_segs_per_thread * 2, dt)
     viewer = PSViewer(rod)
     ps.set_ground_plane_mode("none")
     ps.set_user_callback(viewer.callback)
