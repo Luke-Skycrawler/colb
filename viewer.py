@@ -4,7 +4,7 @@ import numpy as np
 class PSViewer:
     def __init__(self, rbd):
         self.V = rbd.soup.x_transformed.numpy()
-        self.F = rbd.F
+        # self.F = rbd.F
 
         # self.ps_mesh = ps.register_surface_mesh("rbd", self.V, self.F)
         self.ps_medial = ps.register_curve_network("rbd", self.V, rbd.E)

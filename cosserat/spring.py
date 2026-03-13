@@ -1,12 +1,13 @@
 import warp as wp 
-from .viewer import PSViewer
+from viewer import PSViewer
 import polyscope as ps
 from .cosserat import StableCosserat, Node, Seg, from_to, n_fixed, scalar, vec3, mat33, quat, e3
+from .rod_contact import PrimalRod
 
 n_partition = 20
 n_rings = 20
-spring_length = scalar(1.0)
-spring_r = scalar(0.1)
+spring_length = scalar(10.0)
+spring_r = scalar(1.0)
 @wp.kernel
 def reset_nodes(x: wp.array(dtype = Node)):
     n_nodes = x.shape[0]
@@ -48,7 +49,7 @@ def init_rest_frame(seg: wp.array(dtype = Seg)):
         seg[i].q_rest = wp.quat_identity(scalar)
         
     
-class CosseratHelix(StableCosserat):
+class CosseratHelix(PrimalRod):
     def __init__(self, dt):
         n_nodes = n_partition * n_rings
         super().__init__(n_nodes, dt)
@@ -64,13 +65,12 @@ class CosseratHelix(StableCosserat):
         self.frame = 0
 
 
-
-
 if __name__ == '__main__':
     wp.init()
     ps.init()
     dt = 1e-3
     sim = CosseratHelix(dt)
+    # sim = PrimalRod(10, dt)
     viewer = PSViewer(sim)
     ps.set_ground_plane_mode("none")
     ps.set_user_callback(viewer.callback)

@@ -60,7 +60,14 @@ class RodContact(ContactSolverBase, StableCosserat):
         geom = Soup()
         geom.xcs = wp.zeros((self.n_nodes,), dtype = vec3)
         geom.triangles = wp.zeros((1,), dtype = int)
-        geom.edges = wp.zeros((self.n_segs * 2,), dtype = int)
+
+        l0 = self.segs.numpy()["l"]
+        select = l0 > 0.0
+        e_start = np.arange(self.n_nodes - 1)[select]
+        e_end = e_start + 1
+        self.E = np.hstack((e_start.reshape(-1, 1), e_end.reshape(-1, 1)))
+        
+        geom.edges = wp.array(self.E.reshape(-1), dtype = int)
         geom.body = wp.zeros((1, ), dtype = int)
         geom.x_transformed = wp.zeros((self.n_nodes,), dtype = vec3)
 
@@ -77,7 +84,7 @@ class RodContact(ContactSolverBase, StableCosserat):
         return None
 
     def get_contact_points(self):
-        wp.launch(get_contact_points, (self.n_contacts,), inputs = [self.history, self.soup, self.contacts_new.list, self.contact_ret])
+        wp.launch(get_contact_points, (self.n_contacts,), inputs = [self.nodes, self.contacts_new.list, self.contact_ret])
         # filter d > 2 * thickness
         dists = self.contact_ret.dists.numpy()[:self.n_contacts]
         points = self.contact_ret.points.numpy()[:self.n_contacts]
@@ -194,4 +201,7 @@ class PrimalRod(RodContact):
         self.add_du(self.alpha)
         return self.alpha
 
+    def prestep(self):
+        super().prestep()
+        self.detect_collision()
     

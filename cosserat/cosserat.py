@@ -6,12 +6,14 @@ from scalar_types import *
 g = vec3(0.0, -10.0, 0.0)
 e3 = vec3(0.0, 0.0, 1.0)
 
+# kss = scalar(1.0e9)
+# kbt = scalar(1.0e9)
 kss = scalar(1.0e6)
 kbt = scalar(1.0e4)
 
 n_fixed = 1
 
-length = scalar(1.0)
+length = scalar(10.0)
 @wp.struct
 class Seg: 
     q: quat
@@ -226,13 +228,3 @@ class StableCosserat:
         self.frame += 1
     
 
-if __name__ == '__main__':
-    wp.config.max_unroll = 0
-    wp.init()
-    ps.init()
-    dt = 1e-3
-    sim = StableCosserat(10, dt)
-    viewer = PSViewer(sim)
-    ps.set_ground_plane_mode("none")
-    ps.set_user_callback(viewer.callback)
-    ps.show()

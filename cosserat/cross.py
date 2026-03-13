@@ -1,7 +1,7 @@
 import warp as wp 
 from scalar_types import * 
 from .cosserat import Node, Seg, n_fixed, from_to
-from .viewer import PSViewer
+from viewer import PSViewer
 import polyscope as ps
 import numpy as np
 from .cosserat import StableCosserat
@@ -20,12 +20,12 @@ def reset(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
     if i >= n_segs_per_thread:
         e3 = wp.vec3(1.0, 0.0, 0.0)
         ii -= n_segs_per_thread
-        mid += wp.vec3(0.0, 0.04, 0.0)
+        mid += wp.vec3(0.0, 0.4, 0.0)
         vy = scalar(-1.0)
 
-    li = 1.0 / float(n_segs_per_thread)
+    li = 10.0 / float(n_segs_per_thread)
     n_nodes = x.shape[0]
-    x[i].x = vec3(e3 * (float(ii) * li - 0.5) + mid)
+    x[i].x = vec3(e3 * (float(ii) * li - 5.0) + mid)
     x[i].x0 = x[i].x
     x[i].v = vec3(o, vy, o)
     x[i].v0 = vec3(o, vy, o)
