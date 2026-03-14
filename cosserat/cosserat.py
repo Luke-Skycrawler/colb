@@ -3,6 +3,9 @@ from viewer import PSViewer
 import polyscope as ps
 from scalar_types import *
 
+o = scalar(1.0)
+z = scalar(0.0)
+
 g = vec3(0.0, -10.0, 0.0)
 e3 = vec3(0.0, 0.0, 1.0)
 
@@ -14,6 +17,10 @@ kbt = scalar(1.0e4)
 n_fixed = 1
 
 length = scalar(10.0)
+'''
+segment ei = (ei0, nxt)
+nxt == -1 means the segment does not exist
+'''
 @wp.struct
 class Seg: 
     q: quat
@@ -23,7 +30,8 @@ class Seg:
     # kbt: scalar
     w: quat
     q0: quat
-    lam: scalar
+    # lam: scalar
+    nxt: int
 
 @wp.struct 
 class Node: 
@@ -35,6 +43,7 @@ class Node:
     Hi: mat33
     fi: vec3
     mass: scalar
+    last: int
 
 @wp.func 
 def compute_y(x: Node, dt: scalar):
@@ -52,14 +61,14 @@ def compute_w(seg: Seg, dt: scalar):
 def init_positions(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scalar, prescribed_motion: wp.array(dtype = vec3)): 
     i = wp.tid()
     if x[i].mass > 0.0:
-        eg = vec3(scalar(0.0), scalar(-1.0), scalar(0.0))
+        eg = vec3(z, scalar(-1.0), z)
         at = wp.dot(eg, (x[i].v - x[i].v0) / dt)
         a_tilde = at / scalar(10.0)
-        a_tilde = wp.clamp(a_tilde, scalar(0.0), scalar(1.0))
+        a_tilde = wp.clamp(a_tilde, z, o)
         a = g * a_tilde
         y = x[i].x0 + dt * x[i].v + dt * dt * g
         x[i].x = y
-        if i < x.shape[0] - 1:
+        if seg[i].nxt >= 0:
             seg[i].q = compute_w(seg[i], dt)
     else: 
         x[i].x += prescribed_motion[i]
@@ -68,9 +77,12 @@ def init_positions(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: sc
 def compute_Css(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), i: int):
     '''
     shear and stretch constraint 
+    did not check nxt == -1 case, avoid calling this func when seg[i] not exist
     '''
-    x1 = x[i + 1].x
+    # x1 = x[i + 1].x
     x0 = x[i].x
+    nxt = seg[i].nxt
+    x1 = x[nxt].x 
     li = seg[i].l
     return (x1 - x0) / li - wp.quat_rotate(seg[i].q, e3)
 
@@ -84,9 +96,12 @@ def position_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: s
     '''
     i = wp.tid()
     if i % 2 == odd and x[i].mass > 0.0:
-        lhs = x[i].mass / (dt * dt) + kss / seg[i - 1].l
-        
-        c0 = compute_Css(x, seg, i - 1)
+        last = x[i].last
+        lhs = z
+        c0 = vec3(z)
+        if last >= 0:
+            lhs = x[i].mass / (dt * dt) + kss / seg[last].l
+            c0 = compute_Css(x, seg, last)
         # rhs = mass / (dt * dt) * (yi - x[i].x) + kss * c0
         rhs = kss * c0 - g * x[i].mass
         if i < x.shape[0] - 1:
@@ -96,29 +111,29 @@ def position_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: s
         
         x[i].x += -rhs / lhs
 
-@wp.func
-def phi(seg: wp.array(dtype = Seg), i: int) -> scalar:
-    '''
-    phi in Eq.4
-    '''
-    ret = 1.0
-    qbar = wp.quat_inverse(seg[i].q)
-    q1 = qbar * seg[i + 1].q
-    q2 = seg[i].q_rest
-    cond_1 = wp.dot(vec3(q1.x, q1.y, q1.z), vec3(q2.x, q2.y, q2.z)) > 0.0
-    if not cond_1: 
-        ret = -1.0
-    # cond = wp.length_sq(q1 - q2) > wp.length_sq(q1 + q2)
-    # if cond:
-        # ret = -1.0
-    return ret
+# @wp.func
+# def phi(seg: wp.array(dtype = Seg), i: int) -> scalar:
+#     '''
+#     phi in Eq.4
+#     '''
+#     ret = 1.0
+#     qbar = wp.quat_inverse(seg[i].q)
+#     q1 = qbar * seg[i + 1].q
+#     q2 = seg[i].q_rest
+#     cond_1 = wp.dot(vec3(q1.x, q1.y, q1.z), vec3(q2.x, q2.y, q2.z)) > 0.0
+#     if not cond_1: 
+#         ret = -1.0
+#     # cond = wp.length_sq(q1 - q2) > wp.length_sq(q1 + q2)
+#     # if cond:
+#         # ret = -1.0
+#     return ret
 
 @wp.func
 def from_to(f: vec3, t: vec3) -> quat:
     h = scalar(0.5) * (f + t)
     l = wp.length_sq(h)
     if l > 0: 
-        h *= scalar(1.0) / wp.sqrt(l)
+        h *= o / wp.sqrt(l)
     
     return quat(wp.cross(f, h), wp.dot(f, h))
 
@@ -127,7 +142,7 @@ def quat_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scala
     i = wp.tid()
     if i % 2 == odd: 
         v = -scalar(2.0) * kss * (x[i + 1].x - x[i].x) 
-        b = wp.quaternion(scalar(0.0), scalar(0.0), scalar(0.0), scalar(0.0), scalar)
+        b = wp.quaternion(z, z, z, z, scalar)
         start = max(0, i - 1)
         end = min(i + 1, seg.shape[0] - 1)
         for s in range(start, end):
@@ -141,10 +156,10 @@ def quat_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scala
             if i == s:
                 qq = wp.quat_inverse(qq)
             
-            phii = -scalar(1.0)
+            phii = scalar(-1.0)
             ang = seg[s].q_rest
             if wp.dot(wp.vec4d(qq.x, qq.y, qq.z, qq.w), wp.vec4d(ang.x, ang.y, ang.z, ang.w)) > 0.0:
-                phii = scalar(1.0)
+                phii = o
             if s == i:
                 ang = wp.quat_inverse(ang)
             li = seg[s].l
@@ -153,8 +168,8 @@ def quat_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scala
             seg[i].q = from_to(e3, wp.normalize(-v))
         else: 
             lam = wp.length(v) + wp.length(b)
-            v_quat = wp.quaternion(v, scalar(0.0), scalar)
-            e3q = wp.quaternion(e3, scalar(0.0), scalar)
+            v_quat = wp.quaternion(v, z, scalar)
+            e3q = wp.quaternion(e3, z, scalar)
             vbe3 = v_quat * b * e3q
             qi = (vbe3 + lam * b)
             seg[i].q = qi / wp.length(qi)
@@ -177,8 +192,9 @@ def reset(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
     n_nodes = x.shape[0]
     x[i].x = e3 * scalar(i) * li
     x[i].x0 = x[i].x
-    x[i].v = vec3(scalar(0.0), scalar(0.0), scalar(0.0))
-    x[i].v0 = vec3(scalar(0.0), scalar(0.0), scalar(0.0))
+    x[i].v = vec3(z)
+    x[i].v0 = vec3(z)
+    x[i].last = i - 1
     if i > n_fixed:
         x[i].mass = scalar(1.0)
     else: 
@@ -187,8 +203,11 @@ def reset(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
         seg[i].l = li
         seg[i].q = wp.quat_identity(scalar)
         seg[i].q0 = wp.quat_identity(scalar)
-        seg[i].w = wp.quaternion(scalar(0.0), scalar(0.0), scalar(0.0), scalar(0.0), scalar)
+        seg[i].w = wp.quaternion(z, z, z, z, scalar)
         seg[i].q_rest = wp.quat_identity(scalar)
+        seg[i].nxt = i + 1
+    # else:
+    #     seg[i].nxt = -1
 
 class StableCosserat:
     def __init__(self, n_nodes, dt): 

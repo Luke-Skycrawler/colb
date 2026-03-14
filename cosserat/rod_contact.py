@@ -5,10 +5,13 @@ from scalar_types import *
 import numpy as np
 from geometry import Soup
 
+'''
+Contact handling for Cosserat rod, using primal preconditioned gradient descent.
+'''
 o = scalar(1.0)
 z = scalar(0.0)
 
-stiffness = 1e8
+stiffness = 1e6
 gravity = -9.8
 
 @wp.func 
@@ -213,6 +216,8 @@ class PrimalRod(RodContact):
 
     def compute_du(self):
         wp.launch(du_kernel, dim = (self.n_nodes,), inputs = [self.precond, self.rhs, self.du])
+        du = self.du.numpy()
+        print("du norm = ", np.linalg.norm(du, axis = 1).max())
 
     def add_du(self, alpha):
         wp.launch(add_du_kernel, dim = (self.n_nodes,), inputs = [self.du, self.nodes, alpha, self.dt])
@@ -232,6 +237,9 @@ class PrimalRod(RodContact):
         wp.launch(elastics_precond, dim = (self.n_nodes,), inputs = [self.nodes, self.segs, self.precond, self.rhs, self.dt])
 
     def vbd_step_position(self):
+        '''
+        override the position update
+        '''
         for it in range(2):
             self.compute_contact_preconditioner_rhs()
             self.compute_elastics_preconditioner_rhs()
