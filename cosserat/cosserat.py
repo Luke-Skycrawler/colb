@@ -6,8 +6,8 @@ from scalar_types import *
 g = vec3(0.0, -10.0, 0.0)
 e3 = vec3(0.0, 0.0, 1.0)
 
-# kss = scalar(1.0e9)
-# kbt = scalar(1.0e9)
+# kss = scalar(1.0e8)
+# kbt = scalar(1.0e8)
 kss = scalar(1.0e6)
 kbt = scalar(1.0e4)
 

@@ -1,6 +1,6 @@
 import warp as wp 
 from contact import ContactSolverBase, XConstraint, thickness, contact_volume, buffer, eps, ContactRet
-from .cosserat import Node, Seg, StableCosserat
+from .cosserat import Node, Seg, StableCosserat, kss, kbt, compute_Css, g
 from scalar_types import *
 import numpy as np
 from geometry import Soup
@@ -8,7 +8,7 @@ from geometry import Soup
 o = scalar(1.0)
 z = scalar(0.0)
 
-stiffness = 4e4
+stiffness = 1e8
 gravity = -9.8
 
 @wp.func 
@@ -173,6 +173,23 @@ def add_du_kernel(du: wp.array(dtype = vec3), p: wp.array(dtype = Node), alpha: 
     i = wp.tid()
     p[i] = apply_du(du[i], p[i], alpha, dt)
 
+@wp.kernel
+def elastics_precond(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), precond: wp.array(dtype = mat33), b: wp.array(dtype = vec3), dt: scalar):
+    i = wp.tid()
+    if x[i].mass > z:
+        lhs = wp.diag(vec3(kss / seg[i - 1].l))
+        
+        c0 = compute_Css(x, seg, i - 1)
+        # rhs = mass / (dt * dt) * (yi - x[i].x) + kss * c0
+        rhs = kss * c0
+        if i < x.shape[0] - 1:
+            c1 = compute_Css(x, seg, i)
+            rhs -= kss * c1
+            lhs += wp.diag(vec3(kss / seg[i].l))
+        
+        b[i] += rhs * dt
+        precond[i] += lhs
+
 class PrimalRod(RodContact):
     def __init__(self, n_nodes, dt):
         RodContact.__init__(self, n_nodes, dt)
@@ -186,10 +203,13 @@ class PrimalRod(RodContact):
         self.precond.zero_()
         self.rhs.zero_()
 
-        wp.launch(preconditioner_diag_kernel, dim = (self.n_contacts, ), inputs = [self.Node, self.contacts_new.list, self.precond, self.rhs, self.dt])
+        wp.launch(preconditioner_diag_kernel, dim = (self.n_contacts, ), inputs = [self.nodes, self.contacts_new.list, self.precond, self.rhs, self.dt])
 
     def compute_mass_preconditioner_rhs(self):
         wp.launch(rhs_kernel, dim = (self.n_nodes,), inputs = [self.nodes, self.precond, self.rhs, self.dt])
+
+    def compute_du(self):
+        wp.launch(du_kernel, dim = (self.n_nodes,), inputs = [self.precond, self.rhs, self.du])
 
     def add_du(self, alpha):
         wp.launch(add_du_kernel, dim = (self.n_nodes,), inputs = [self.du, self.nodes, alpha, self.dt])
@@ -205,3 +225,14 @@ class PrimalRod(RodContact):
         super().prestep()
         self.detect_collision()
     
+    def compute_elastics_preconditioner_rhs(self):
+        wp.launch(elastics_precond, dim = (self.n_nodes,), inputs = [self.nodes, self.segs, self.precond, self.rhs, self.dt])
+
+    def vbd_step_position(self):
+        for it in range(8):
+            self.compute_contact_preconditioner_rhs()
+            self.compute_elastics_preconditioner_rhs()
+            self.compute_mass_preconditioner_rhs()
+            self.compute_du()
+
+            self.line_search()
