@@ -5,7 +5,7 @@ from geometry import Soup
 from BDF1 import BDFHistory
 
 thickness = 0.0475
-contact_volume = 8192
+contact_volume = 300000
 buffer = thickness
 eps = 1e-6
 
@@ -255,7 +255,7 @@ class ContactSolverBase:
         
         wp.launch(edge_edge_collision, n_edges, inputs = [self.bvh_edges.id, self.soup.x_transformed, self.soup.edges, self.contacts_new, thickness])
         self.n_contacts = self.contacts_new.cnt.numpy()[0]
-        # print(f"n contacts = {self.n_contacts}")
+        print(f"n contacts = {self.n_contacts}")
         # print(self.contacts.list.numpy()["a1a2b1b2"][:self.n_contacts])
 
     def get_contact_points(self):

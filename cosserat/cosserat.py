@@ -216,7 +216,7 @@ class StableCosserat:
         wp.launch(init_positions, self.n_nodes, inputs = [self.nodes, self.segs, self.dt, self.prescribed_motion])
 
     def step(self):
-        n_substeps = 10
+        n_substeps = 1
         for ss in range(n_substeps): 
             with wp.ScopedTimer(f"step"):
                 self.prestep()

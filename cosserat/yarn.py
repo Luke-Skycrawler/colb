@@ -27,7 +27,8 @@ class YarnGeometryComplex(SimComplexBase):
         self.spline_points = np.load(f"{folder}/spline_points.npy")
         self.yarn_start = np.load(f"{folder}/yarn_start.npy")
         upsample = len(self.spline_points) // self.yarn_start[-1]
-        self.yarn_start *= upsample
+        # self.yarn_start *= upsample
+        self.spline_points = self.spline_points[np.arange(0, self.spline_points.shape[0], upsample)]
         assert len(self.spline_points) == self.yarn_start[-1] 
         if os.path.exists(f"{folder}/is_closed.npy"):
             self.is_closed = np.load(f"{folder}/is_closed.npy")
@@ -43,7 +44,7 @@ class YarnGeometryComplex(SimComplexBase):
         # each yarn is treated as an seperate object
         ys = self.yarn_start
         for i in range(len(ys) - 1):
-            end = ys[i + 1] - 12
+            end = ys[i + 1] - 3
             start = ys[i]
             v = self.spline_points[start: end]
             e0 = np.arange(start, end - 1) - start
