@@ -38,7 +38,6 @@ class SimComplexBase:
         B = np.zeros(0, dtype = int)
         body_idx = 0
 
-        nxt = self.get_next_object()
         for nxt in self.get_next_object():
             v, e, ff = nxt
             b = np.ones((v.shape[0],), dtype = int) * body_idx

@@ -218,13 +218,14 @@ class StableCosserat:
     def step(self):
         n_substeps = 10
         for ss in range(n_substeps): 
-            self.prestep()
-            for it in range(self.max_iters): 
-                self.vbd_step_position()
-                for odd in range(2): 
-                    wp.launch(quat_update, self.n_segs, inputs = [self.nodes, self.segs, self.dt, odd])
+            with wp.ScopedTimer(f"step"):
+                self.prestep()
+                for it in range(self.max_iters): 
+                    self.vbd_step_position()
+                    for odd in range(2): 
+                        wp.launch(quat_update, self.n_segs, inputs = [self.nodes, self.segs, self.dt, odd])
 
-            wp.launch(update_v, self.n_nodes, inputs = [self.nodes, self.segs, self.dt])
-        self.frame += 1
+                wp.launch(update_v, self.n_nodes, inputs = [self.nodes, self.segs, self.dt])
+                self.frame += 1
     
 

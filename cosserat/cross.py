@@ -73,7 +73,7 @@ if __name__ == '__main__':
     wp.config.max_unroll = 0
     wp.init()
     ps.init()
-    dt = 1.0e-3
+    dt = 2e-3
     # rod = ContactTest(n_segs_per_thread * 2, dt)
     rod = ContactTestPrimal(n_segs_per_thread * 2, dt)
     viewer = PSViewer(rod)

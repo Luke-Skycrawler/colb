@@ -54,8 +54,12 @@ def copy_x(x: wp.array(dtype = vec3), nodes: wp.array(dtype = Node)):
 class RodContact(ContactSolverBase, StableCosserat): 
     def __init__(self, n_nodes, dt): 
         StableCosserat.__init__(self, n_nodes, dt)
+        self.define_contact_viewer_interface()
+        ContactSolverBase.__init__(self)
+
+    def define_contact_viewer_interface(self): 
         '''
-        Bridging cosserat rod with contact solver
+        Bridging cosserat rod with contact solver by defining `self.soup: Soup`
         '''
         geom = Soup()
         geom.xcs = wp.zeros((self.n_nodes,), dtype = vec3)
@@ -75,7 +79,6 @@ class RodContact(ContactSolverBase, StableCosserat):
         wp.copy(geom.x_transformed, geom.xcs)
         
         self.soup = geom
-        ContactSolverBase.__init__(self)
     
     def compute_V(self, ret = True):
         wp.launch(copy_x, (self.n_nodes, ), inputs = [self.soup.x_transformed, self.nodes])
@@ -229,7 +232,7 @@ class PrimalRod(RodContact):
         wp.launch(elastics_precond, dim = (self.n_nodes,), inputs = [self.nodes, self.segs, self.precond, self.rhs, self.dt])
 
     def vbd_step_position(self):
-        for it in range(8):
+        for it in range(2):
             self.compute_contact_preconditioner_rhs()
             self.compute_elastics_preconditioner_rhs()
             self.compute_mass_preconditioner_rhs()
