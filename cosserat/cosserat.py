@@ -104,7 +104,7 @@ def position_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: s
             c0 = compute_Css(x, seg, last)
         # rhs = mass / (dt * dt) * (yi - x[i].x) + kss * c0
         rhs = kss * c0 - g * x[i].mass
-        if i < x.shape[0] - 1:
+        if seg[i].nxt >= 0:
             c1 = compute_Css(x, seg, i)
             rhs -= kss * c1
             lhs += kss / seg[i].l
@@ -143,13 +143,15 @@ def quat_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scala
     if i % 2 == odd: 
         v = -scalar(2.0) * kss * (x[i + 1].x - x[i].x) 
         b = wp.quaternion(z, z, z, z, scalar)
-        start = max(0, i - 1)
-        end = min(i + 1, seg.shape[0] - 1)
+        # start = max(0, i - 1)
+        # end = min(i + 1, seg.shape[0] - 1)
+        start = max(0, x[i].last)
+        end = i + 1
         for s in range(start, end):
-            oid = i - 1 
-            if s == i:
-                oid = i + 1
-            if seg[oid].l < 0.0 or seg[s].l < 0.0:
+            oid = i + 1
+            if s != i:
+                oid = x[i].last
+            if seg[oid].nxt < 0 or seg[s].l < 0.0:
                 continue
             oq = seg[oid].q
             qq = wp.quat_inverse(oq) * seg[i].q
@@ -180,7 +182,7 @@ def update_v(x: wp.array(dtype = Node), segs: wp.array(dtype = Seg), dt: scalar)
     x[i].v0 = x[i].v
     x[i].v = (x[i].x - x[i].x0) / dt
     x[i].x0 = x[i].x 
-    if i < segs.shape[0]:
+    if segs[i].nxt >= 0:
         segs[i].w = (segs[i].q - segs[i].q0) / dt
         segs[i].q0 = segs[i].q
     
@@ -206,15 +208,15 @@ def reset(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
         seg[i].w = wp.quaternion(z, z, z, z, scalar)
         seg[i].q_rest = wp.quat_identity(scalar)
         seg[i].nxt = i + 1
-    # else:
-    #     seg[i].nxt = -1
+    else:
+        seg[i].nxt = -1
 
 class StableCosserat:
     def __init__(self, n_nodes, dt): 
         self.max_iters = 4
         self.dt = dt
         self.n_nodes = n_nodes
-        self.n_segs = self.n_nodes - 1
+        self.n_segs = self.n_nodes
 
         self.nodes = wp.zeros((self.n_nodes), dtype = Node)
         self.segs = wp.zeros((self.n_segs), dtype = Seg)
@@ -235,7 +237,7 @@ class StableCosserat:
         wp.launch(init_positions, self.n_nodes, inputs = [self.nodes, self.segs, self.dt, self.prescribed_motion])
 
     def step(self):
-        n_substeps = 1
+        n_substeps = 10
         for ss in range(n_substeps): 
             with wp.ScopedTimer(f"step"):
                 self.prestep()

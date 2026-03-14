@@ -25,6 +25,7 @@ def reset_nodes(x: wp.array(dtype = Node)):
     z3 = vec3(scalar(0.0), scalar(0.0), scalar(0.0))
     x[i].v = z3
     x[i].v0 = z3
+    x[i].last = i - 1
 
 @wp.kernel
 def reset_segs(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
@@ -33,17 +34,21 @@ def reset_segs(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
     i = wp.tid()
 
     p0 = x[i].x
-    p1 = x[i + 1].x
+    if i < x.shape[0] - 1: 
+        p1 = x[i + 1].x
     
-    seg[i].l = wp.length(p1 - p0)
-    seg[i].w = wp.quaternion(scalar(0.0), scalar(0.0), scalar(0.0), scalar(0.0), scalar)
-    seg[i].q = wp.normalize(from_to(e3, wp.normalize(p1 - p0)))
-    seg[i].q0 = seg[i].q
+        seg[i].l = wp.length(p1 - p0)
+        seg[i].w = wp.quaternion(scalar(0.0), scalar(0.0), scalar(0.0), scalar(0.0), scalar)
+        seg[i].q = wp.normalize(from_to(e3, wp.normalize(p1 - p0)))
+        seg[i].q0 = seg[i].q
+        seg[i].nxt = i + 1
+    else: 
+        seg[i].nxt = -1
 
 @wp.kernel
 def init_rest_frame(seg: wp.array(dtype = Seg)):
     i = wp.tid()
-    if i > 0:
+    if i > 0 and seg[i].nxt >= 0:
         seg[i].q_rest = wp.quat_inverse(seg[i - 1].q) * seg[i].q
     else: 
         seg[i].q_rest = wp.quat_identity(scalar)

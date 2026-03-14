@@ -11,7 +11,7 @@ Contact handling for Cosserat rod, using primal preconditioned gradient descent.
 o = scalar(1.0)
 z = scalar(0.0)
 
-stiffness = 1e6
+stiffness = 1e8
 gravity = -9.8
 
 @wp.func 
@@ -68,9 +68,9 @@ class RodContact(ContactSolverBase, StableCosserat):
         geom.xcs = wp.zeros((self.n_nodes,), dtype = vec3)
         geom.triangles = wp.zeros((1,), dtype = int)
 
-        l0 = self.segs.numpy()["l"]
-        select = l0 > 0.0
-        e_start = np.arange(self.n_nodes - 1)[select]
+        nxt = self.segs.numpy()["nxt"]
+        select = nxt >= 0
+        e_start = np.arange(self.n_nodes)[select]
         e_end = e_start + 1
         self.E = np.hstack((e_start.reshape(-1, 1), e_end.reshape(-1, 1)))
         
@@ -216,8 +216,8 @@ class PrimalRod(RodContact):
 
     def compute_du(self):
         wp.launch(du_kernel, dim = (self.n_nodes,), inputs = [self.precond, self.rhs, self.du])
-        du = self.du.numpy()
-        print("du norm = ", np.linalg.norm(du, axis = 1).max())
+        # du = self.du.numpy()
+        # print("du norm = ", np.linalg.norm(du, axis = 1).max())
 
     def add_du(self, alpha):
         wp.launch(add_du_kernel, dim = (self.n_nodes,), inputs = [self.du, self.nodes, alpha, self.dt])

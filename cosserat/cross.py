@@ -29,6 +29,7 @@ def reset(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
     x[i].x0 = x[i].x
     x[i].v = vec3(o, vy, o)
     x[i].v0 = vec3(o, vy, o)
+    x[i].last = i - 1
     if ii > n_fixed and ii < n_segs_per_thread - 1:
         x[i].mass = scalar(1.0)
     else: 
@@ -40,9 +41,11 @@ def reset(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg)):
     seg[i].q_rest = wp.quat_identity(scalar)
     if ii < n_segs_per_thread - 1:
         seg[i].l = scalar(li)
+        seg[i].nxt = i + 1
     else:
         # segment does not exist
         seg[i].l = scalar(-1.0)
+        seg[i].nxt = -1
 
 @wp.kernel
 def update_prescribed(prescribed_motion: wp.array(dtype = vec3), dt: scalar):
