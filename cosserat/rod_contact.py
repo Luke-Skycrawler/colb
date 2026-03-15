@@ -13,6 +13,7 @@ z = scalar(0.0)
 
 stiffness = 1e8
 gravity = -9.8
+debug = False
 
 @wp.func 
 def fetch_dist_n_r0r1(p: wp.array(dtype = Node), c: XConstraint): 
@@ -183,18 +184,26 @@ def add_du_kernel(du: wp.array(dtype = vec3), p: wp.array(dtype = Node), alpha: 
 def elastics_precond(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), precond: wp.array(dtype = mat33), b: wp.array(dtype = vec3), dt: scalar):
     i = wp.tid()
     if x[i].mass > z:
-        lhs = wp.diag(vec3(kss / seg[i - 1].l))
-        
-        c0 = compute_Css(x, seg, i - 1)
+        last = x[i].last
+        lhs = mat33(z)
+        c0 = vec3(z)
+        if last >= 0 and seg[last].nxt == i:
+            lhs = wp.diag(vec3(kss / seg[last].l))
+            c0 = compute_Css(x, seg, last)
         # rhs = mass / (dt * dt) * (yi - x[i].x) + kss * c0
         rhs = kss * c0
-        if i < x.shape[0] - 1:
+        if seg[i].nxt >= 0:
             c1 = compute_Css(x, seg, i)
             rhs -= kss * c1
             lhs += wp.diag(vec3(kss / seg[i].l))
         
         b[i] += rhs * dt
         precond[i] += lhs
+
+@wp.kernel
+def _precond_J_kernel(precond: wp.array(dtype = mat33), J: wp.array(dtype = scalar)):
+    i = wp.tid()
+    J[i] = wp.determinant(precond[i])
 
 class PrimalRod(RodContact):
     def __init__(self, n_nodes, dt):
@@ -216,8 +225,14 @@ class PrimalRod(RodContact):
 
     def compute_du(self):
         wp.launch(du_kernel, dim = (self.n_nodes,), inputs = [self.precond, self.rhs, self.du])
-        # du = self.du.numpy()
-        # print("du norm = ", np.linalg.norm(du, axis = 1).max())
+        J = wp.zeros((self.n_nodes,), dtype = scalar)
+        if debug: 
+            wp.launch(_precond_J_kernel, dim = (self.n_nodes,), inputs = [self.precond, J])
+            du = self.du.numpy()
+            Jnp = J.numpy()
+            print("rhs norm = ", np.linalg.norm(self.rhs.numpy(), axis = 1).max())
+            print("du norm = ", np.linalg.norm(du, axis = 1).max())
+            print("J norm min = ", Jnp.min())
 
     def add_du(self, alpha):
         wp.launch(add_du_kernel, dim = (self.n_nodes,), inputs = [self.du, self.nodes, alpha, self.dt])
@@ -234,7 +249,18 @@ class PrimalRod(RodContact):
         self.detect_collision()
     
     def compute_elastics_preconditioner_rhs(self):
+        if debug: 
+            rhs_norm_before = np.linalg.norm(self.rhs.numpy(), axis = 1).max()
         wp.launch(elastics_precond, dim = (self.n_nodes,), inputs = [self.nodes, self.segs, self.precond, self.rhs, self.dt])
+        if debug:
+            rhs_after = self.rhs.numpy()
+            rhs_norm_after = np.linalg.norm(rhs_after, axis = 1).max()
+            print(f"rhs norm before elastics = {rhs_norm_before}, after elastics = {rhs_norm_after}")
+            idx = np.isnan(rhs_after[:, 0]) | np.isnan(rhs_after[:, 1]) | np.isnan(rhs_after[:, 2])
+            idx = np.arange(self.n_nodes)[idx]
+            print(f"nan index = {idx}")
+            nxt = self.segs.numpy()["nxt"]
+            print(f"nxt at nan index last = {nxt[idx - 1]}")
 
     def vbd_step_position(self):
         '''

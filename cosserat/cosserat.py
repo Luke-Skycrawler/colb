@@ -140,18 +140,24 @@ def from_to(f: vec3, t: vec3) -> quat:
 @wp.kernel
 def quat_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scalar, odd: int):
     i = wp.tid()
-    if i % 2 == odd: 
-        v = -scalar(2.0) * kss * (x[i + 1].x - x[i].x) 
+    if i % 2 == odd and seg[i].nxt >= 0 and x[i].last >= 0 and seg[x[i].last].nxt >= 0: 
+    # if i % 2 == odd and seg[i].nxt >= 0: 
+        nxt = seg[i].nxt
+        v = -scalar(2.0) * kss * (x[nxt].x - x[i].x) 
         b = wp.quaternion(z, z, z, z, scalar)
         # start = max(0, i - 1)
         # end = min(i + 1, seg.shape[0] - 1)
-        start = max(0, x[i].last)
-        end = i + 1
+        start = x[i].last
+        if start < 0 or seg[start].nxt < 0: 
+            start = i
+        end = nxt
+        if seg[nxt].nxt < 0: 
+            end = i
         for s in range(start, end):
-            oid = i + 1
+            oid = nxt
             if s != i:
                 oid = x[i].last
-            if seg[oid].nxt < 0 or seg[s].l < 0.0:
+            if seg[oid].nxt < 0 or seg[s].nxt < 0:
                 continue
             oq = seg[oid].q
             qq = wp.quat_inverse(oq) * seg[i].q
@@ -159,7 +165,7 @@ def quat_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scala
                 qq = wp.quat_inverse(qq)
             
             phii = scalar(-1.0)
-            ang = seg[s].q_rest
+            ang = quat(seg[s].q_rest)
             if wp.dot(wp.vec4d(qq.x, qq.y, qq.z, qq.w), wp.vec4d(ang.x, ang.y, ang.z, ang.w)) > 0.0:
                 phii = o
             if s == i:
@@ -237,7 +243,7 @@ class StableCosserat:
         wp.launch(init_positions, self.n_nodes, inputs = [self.nodes, self.segs, self.dt, self.prescribed_motion])
 
     def step(self):
-        n_substeps = 10
+        n_substeps = 1
         for ss in range(n_substeps): 
             with wp.ScopedTimer(f"step"):
                 self.prestep()
