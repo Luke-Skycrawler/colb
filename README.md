@@ -20,6 +20,11 @@ python links.py
 
 Uses primal solver (`PrimalRbd`) by default. `XPBDRbd` refers to the xpbd solver. 
 
+To run cosserat YLS simulation, use:
+
+```
+python -m cosserat.yarn
+```
 
 #### Performance
 
