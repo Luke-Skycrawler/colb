@@ -10,6 +10,12 @@ Implemented algorithms:
 - [ ] analytically projected newton ^[3]
 - [x] preconditioned gradient descent (primal solver in ^[4])  
 
+#### Prerequisites 
+
+```
+pip install warp-lang libigl==2.5.1 usd-core
+```
+
 #### Command
 
 To run xpbd rigid body chain net simulation, use: 
@@ -20,7 +26,7 @@ python links.py
 
 Uses primal solver (`PrimalRbd`) by default. `XPBDRbd` refers to the xpbd solver. 
 
-To run cosserat YLS simulation, use:
+To run cosserat YLS, use:
 
 ```
 python -m cosserat.yarn
@@ -28,7 +34,7 @@ python -m cosserat.yarn
 
 #### Performance
 
-Tested on RTX 3080.
+Tested on RTX 3080. Python 3.10.14. YLS takes 5ms to simulate 1ms. 
 
 | method                            | real time  | sim time | iterations | early termination | 
 |---|---|---|---|---|

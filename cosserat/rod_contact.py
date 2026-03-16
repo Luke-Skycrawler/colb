@@ -11,7 +11,7 @@ Contact handling for Cosserat rod, using primal preconditioned gradient descent.
 o = scalar(1.0)
 z = scalar(0.0)
 
-stiffness = 1e8
+stiffness = 1e9
 gravity = -9.8
 debug = False
 
@@ -178,7 +178,8 @@ def apply_du(du: vec3, p: Node, alpha: scalar, dt: scalar):
 @wp.kernel
 def add_du_kernel(du: wp.array(dtype = vec3), p: wp.array(dtype = Node), alpha: scalar, dt: scalar):
     i = wp.tid()
-    p[i] = apply_du(du[i], p[i], alpha, dt)
+    if p[i].mass > z: 
+        p[i] = apply_du(du[i], p[i], alpha, dt)
 
 @wp.kernel
 def elastics_precond(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), precond: wp.array(dtype = mat33), b: wp.array(dtype = vec3), dt: scalar):
@@ -261,6 +262,7 @@ class PrimalRod(RodContact):
             print(f"nan index = {idx}")
             nxt = self.segs.numpy()["nxt"]
             print(f"nxt at nan index last = {nxt[idx - 1]}")
+            print(f"nxt at nan index = {nxt[idx]}")
 
     def vbd_step_position(self):
         '''

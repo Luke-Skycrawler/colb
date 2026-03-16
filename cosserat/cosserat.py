@@ -11,8 +11,8 @@ e3 = vec3(0.0, 0.0, 1.0)
 
 # kss = scalar(1.0e8)
 # kbt = scalar(1.0e8)
-kss = scalar(1.0e6)
-kbt = scalar(1.0e4)
+kss = scalar(1.0e8)
+kbt = scalar(1.0e6)
 
 n_fixed = 1
 
@@ -181,7 +181,7 @@ def quat_update(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), dt: scala
             vbe3 = v_quat * b * e3q
             qi = (vbe3 + lam * b)
             seg[i].q = qi / wp.length(qi)
-        
+
 @wp.kernel
 def update_v(x: wp.array(dtype = Node), segs: wp.array(dtype = Seg), dt: scalar):
     i = wp.tid()
@@ -243,7 +243,7 @@ class StableCosserat:
         wp.launch(init_positions, self.n_nodes, inputs = [self.nodes, self.segs, self.dt, self.prescribed_motion])
 
     def step(self):
-        n_substeps = 1
+        n_substeps = 10
         for ss in range(n_substeps): 
             with wp.ScopedTimer(f"step"):
                 self.prestep()

@@ -66,6 +66,10 @@ class YarnGeometryComplex(SimComplexBase):
             v *= 200.0
             yield v, e, f
 
+@wp.func 
+def should_fix(x: vec3):
+    return wp.abs(x.y) > scalar(18.0)
+
 @wp.kernel
 def reset_nodes(x: wp.array(dtype = Node), mass: wp.array(dtype = scalar), position: wp.array(dtype = vec3)):
     i = wp.tid()
@@ -74,7 +78,11 @@ def reset_nodes(x: wp.array(dtype = Node), mass: wp.array(dtype = scalar), posit
     x[i].x0 = x[i].x
     x[i].v = z3
     x[i].v0 = z3
-    x[i].mass = mass[i]
+    if not should_fix(x[i].x): 
+        # x[i].mass = mass[i]
+        x[i].mass = scalar(1e-2)
+    else: 
+        x[i].mass = scalar(-1.0)
     x[i].last = i - 1
 
 @wp.kernel
@@ -91,23 +99,47 @@ def reset_segs(x: wp.array(dtype = Node), seg: wp.array(dtype = Seg), nxt: wp.ar
         seg[i].q = wp.normalize(from_to(e3, wp.normalize(p1 - p0)))
         seg[i].q0 = seg[i].q
 
-        
+@wp.kernel
+def update_prescribed(x0: wp.array(dtype = vec3), prescribed_motion: wp.array(dtype = vec3), time: scalar, dt: scalar):
+    i = wp.tid() 
+    omega = scalar(0.5 * wp.pi)
+    theta = omega * time 
+    # rotation around y axis 
+    c = wp.cos(theta)
+    s = wp.sin(theta)
+    rotation = mat33(
+        c, z, s,
+        z, o, z,
+        -s, z, c
+    )
+
+    s0 = wp.sin(omega * (time - dt))
+    c0 = wp.cos(omega * (time - dt))
+    rotation0 = mat33(
+        c0, z, s0,
+        z, o, z,
+        -s0, z, c0
+    )
+    if x0[i].y < z: 
+        prescribed_motion[i] = (rotation - rotation0) @ x0[i]
+
 class Yarn(PrimalRod, YarnGeometryComplex):
     def __init__(self, folder, dt):
         YarnGeometryComplex.__init__(self, folder)
         # n_nodes = self.V.shape[0]
         PrimalRod.__init__(self, self.n_nodes, dt)
-        
+
     def reset(self):
         assert self.seg_nxt.shape[0] == self.n_nodes, f"seg_nxt has length {self.seg_nxt.shape[0]} but expected {self.n_nodes}"
         assert self.seg_nxt.max() < self.n_nodes, f"seg_nxt has value {self.seg_nxt.max()} but expected less than {self.n_nodes}"
         nxt = wp.array(self.seg_nxt, dtype = int)
         mass = wp.ones((self.n_nodes,), dtype = scalar)
-        position = wp.array(self.V, dtype = vec3)
-        wp.launch(reset_nodes, (self.n_nodes, ), inputs = [self.nodes, mass, position])
+        # position = wp.array(self.V, dtype = vec3)
+        self.x0 = wp.array(self.V, dtype = vec3)
+        wp.launch(reset_nodes, (self.n_nodes, ), inputs = [self.nodes, mass, self.x0])
         wp.launch(reset_segs, (self.n_segs, ), inputs = [self.nodes, self.segs, nxt])
         wp.launch(init_rest_frame, (self.n_segs, ), inputs = [self.segs])
-        wp.copy(self.soup.x_transformed, position)
+        wp.copy(self.soup.x_transformed, self.x0)
 
         l = self.segs.numpy()['l']
         nxt = self.segs.numpy()['nxt']
@@ -118,14 +150,20 @@ class Yarn(PrimalRod, YarnGeometryComplex):
     def define_contact_viewer_interface(self): 
         pass
 
+    def prestep(self):
+        time = self.frame * self.dt
+        wp.launch(update_prescribed, (self.n_nodes,), inputs = [self.x0, self.prescribed_motion, time, self.dt])
+        super().prestep()
+
 def test_load():
     configs = [
         "flame_ribbing_pattern", 
         "cable_work_pattern",
         "openwork_trellis_pattern",
-        "sleeve"
+        "sleeve",
+        "cable"
     ]
-    folder = "assets/yarn/" + configs[0]
+    folder = "assets/yarn/" + configs[4]
     
     yarn = Yarn(folder, 1e-3)    
     ps.init()
