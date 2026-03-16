@@ -119,7 +119,14 @@ class Yarn(PrimalRod, YarnGeometryComplex):
         pass
 
 def test_load():
-    folder = "assets/yarn/sleeve"
+    configs = [
+        "flame_ribbing_pattern", 
+        "cable_work_pattern",
+        "openwork_trellis_pattern",
+        "sleeve"
+    ]
+    folder = "assets/yarn/" + configs[0]
+    
     yarn = Yarn(folder, 1e-3)    
     ps.init()
     wp.config.max_unroll = 0

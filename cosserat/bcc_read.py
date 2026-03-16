@@ -1,6 +1,7 @@
 import struct
 import numpy as np
 import polyscope as ps 
+import os
 def read_bcc_simple(filename):
     with open(filename, "rb") as f:
 
@@ -33,13 +34,17 @@ if __name__ == "__main__":
         "cable_work_pattern",
         "openwork_trellis_pattern"
     ]
-    curves, points, yarn_start = read_bcc_simple(f"assets/yarn/{patterns[0]}.bcc")
+    pattern = patterns[2]
+    curves, points, yarn_start = read_bcc_simple(f"assets/yarn/{pattern}.bcc")
     for pts, is_loop in curves:
         print(f"Curve with {len(pts)} points, loop: {is_loop}")
 
     print(f"points min = {points.min(axis=0)}, max = {points.max(axis=0)}")
     ps.init()
-
+    if not os.path.exists(f"assets/yarn/{pattern}/spline_points.npy"):
+        os.makedirs(f"assets/yarn/{pattern}", exist_ok = True)
+    np.save(f"assets/yarn/{pattern}/spline_points.npy", points / 240.0)
+    np.save(f"assets/yarn/{pattern}/yarn_start.npy", yarn_start)
     e0 = np.arange(len(points)-1)
     e1 = np.arange(1, len(points))
     edges = np.column_stack([e0, e1])
