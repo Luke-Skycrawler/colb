@@ -214,8 +214,8 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
     def compute_du(self): 
         wp.launch(du_kernel, dim = self.n_bodies, inputs = [self.precond, self.rhs, self.du])
 
-        # return np.max(np.abs(self.du.numpy()))
-        return 1.0
+        return np.max(np.abs(self.du.numpy()))
+        # return 1.0
 
     def add_du(self, alpha): 
         wp.launch(add_du_kernel, dim = (self.n_bodies,), inputs = [self.du, self.history, alpha, self.dt])
@@ -242,7 +242,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
                     du_norm = self.compute_du() 
                     alpha = self.line_search()
                     iter += 1
-                    # print(f"    iter: {iter}, du norm: {du_norm}, alpha = {alpha}")
+                    print(f"    iter: {iter}, du norm: {du_norm}, alpha = {alpha}")
                     newton = not (du_norm < 1e-5 or iter >= max_iter)
         
             self.forward_states()

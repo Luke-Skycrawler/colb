@@ -5,18 +5,19 @@ from utils.scene import JSONComplex
 from xpbd_contact import XPBDRbd
 from primal import PrimalRbd
 from vbd import VBDRbd
-from gauss_newton import LineSearchGDRbd
+from gauss_newton import LineSearchGDRbd, GaussNewtonRbd
 
 def free_float():
     ps.init()
     wp.config.max_unroll = 0
     wp.config.enable_backward = False
     wp.init()
-    dt = 16e-3
+    dt = 8e-3
     # rbd = XPBDRbd(dt, "assets/chains.json")
-    rbd = PrimalRbd(dt, "assets/chains.json")
+    # rbd = PrimalRbd(dt, "assets/chains.json")
     # rbd = VBDRbd(dt, "assets/chains.json")
     # rbd = LineSearchGDRbd(dt, "assets/chains.json")
+    rbd = GaussNewtonRbd(dt, "assets/chains.json")
 
     viewer = PSViewer(rbd)
     ps.set_ground_plane_mode("none")
