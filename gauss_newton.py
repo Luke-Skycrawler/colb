@@ -9,6 +9,8 @@ from rbd_simple import Inertia
 from geometry import Soup
 from warp.optim.linear import cg
 from warp.sparse import bsr_from_triplets, bsr_set_from_triplets
+from utils.data_collector import Profiller
+
 @wp.struct 
 class Triplets:
     rows: wp.array(dtype = int)
@@ -270,6 +272,7 @@ class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
         self.rhs = wp.zeros((self.n_bodies,), dtype = vec6)
         self.du = wp.zeros_like(self.rhs)
         self.triplets = triplets
+        self.profiler = Profiller(max_iters = 8, frames = 4000)
 
     def compute_contact_gh(self):
         # contact hessian and gradient
@@ -300,6 +303,12 @@ class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
         self.frame += 1
 
 
+    def callback_per_iter(self, iter, du_norm, alpha):
+        print(f"    iter: {iter}, du norm: {du_norm}, alpha = {alpha}")
+        self.profiler.convergence[self.frame, iter - 1] = du_norm   
+        self.profiler.alphas[self.frame, iter - 1] = alpha
+
+        
     def step(self):
         for ss in range(1):
             with wp.ScopedTimer("gauss newton step"):
@@ -315,7 +324,7 @@ class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
                     alpha = self.line_search()
                     # alpha = self.line_search_batch()
                     iter += 1
-                    print(f"    iter: {iter}, du norm: {du_norm}, alpha = {alpha}")
+                    self.callback_per_iter(iter, du_norm, alpha)
                     newton = not (du_norm < 1e-5 or iter >= max_iter)
             
                 self.forward_states()

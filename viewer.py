@@ -14,7 +14,7 @@ class PSViewer:
         self.ui_pause = True
         self.animate = False
         self.ui_reload_from = 0
-        self.end_frame = 8000
+        self.end_frame = 4000
         self.capture_interval = 1
      
     def save(self):
@@ -59,4 +59,5 @@ class PSViewer:
                 self.save()
         if self.frame >= self.end_frame:
             print(f"end frame = {self.frame} reached, exiting")
-            quit()
+            
+            self.rbd.profiler.save(f"output/profiler.npz")
