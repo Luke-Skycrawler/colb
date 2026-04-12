@@ -51,11 +51,10 @@ def test(a, b):
         [ref[9:12, 3:6], ref[9:12, 9:12]
     ]])
     print(f"ref = {ref}\nd2p = {d2p}\ndiff = {np.linalg.norm(ref - d2p)}")
+    return d2p
 
-def eigs_decompose():
-    a = np.array([3, 0, 0], dtype = float)
-    b = np.array([0, 2, 0], dtype = float)
 
+def mollifier_hessian(a, b):
     d2pda2 = -2.0 * (np.outer(b, b) - np.dot(b, b) * np.eye(3))
     d2pdb2 = -2.0 * (np.outer(a, a) - np.dot(a, a) * np.eye(3))
     d2pdadb = -2.0 * (np.outer(b, a) - 2 * np.outer(a, b) + np.eye(3) * np.dot(a, b))
@@ -63,7 +62,12 @@ def eigs_decompose():
 
     d2p = np.block([[d2pda2, d2pdadb],
                     [d2pdadb.T, d2pdb2]])
+    return d2p
 
+def eigs_decompose():
+    a = np.array([3, 0, 0], dtype = float)
+    b = np.array([0, 2, 0], dtype = float)
+    d2p = mollifier_hessian(a, b)
     eigvals, eigvecs = np.linalg.eig(d2p)
 
     '''
@@ -75,10 +79,34 @@ def eigs_decompose():
     
     print(eigvals, eigvecs)
 
+def test_full():
+    a = np.array([3, 0, 0], dtype = float)
+    b = np.array([1, 2, 0], dtype = float)
+
+    d2p = mollifier_hessian(a, b)
+
+    I3 = np.eye(3)
+    z3 = np.zeros((3, 3))
+    alpha = np.dot(a, b) / np.dot(a, a)
+    dcdx = np.block([[I3, -alpha * I3],
+                    [z3, I3]])
+    
+    d2p_perp = mollifier_hessian(a, b - alpha * a)
+    d2p_proj = dcdx @ d2p_perp @ dcdx.T
+    
+    print(f"d2p = {np.linalg.norm(d2p)}\nd2p_proj = {np.linalg.norm(d2p_proj)}\ndiff = {np.linalg.norm(d2p - d2p_proj)}")
+
+    # A1 = dcdx_delta H dcdx_delta^T is indeed zero 
+
+
 if __name__ == "__main__":
-    # a = np.random.rand(3)
-    # b = np.random.rand(3)
+    a = np.random.rand(3)
+    b = np.random.rand(3)
 
     # test(a, b)
 
-    eigs_decompose()
+    # eigs_decompose()
+    test_full()
+    # x = test(a, b)
+    # y = test(a, b + a)
+    # print(f"x y diff = {np.linalg.norm(x - y)}")
