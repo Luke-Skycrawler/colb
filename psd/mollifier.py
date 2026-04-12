@@ -1,0 +1,84 @@
+import numpy as np 
+import ipctk
+def molli(a, b):
+    c = np.cross(a, b)
+    p = np.dot(c, c)
+    return p
+def test(a, b):
+    
+    p = molli(a, b)
+
+    dpda = -2.0 * np.cross(b, np.cross(b, a))
+    dpdb = -2.0 * np.cross(a, np.cross(a, b))
+
+    h = 1e-3
+
+    da = np.random.rand(3) * h
+    db = np.random.rand(3) * h
+
+    dp_fd = (molli(a + da, b + db) - molli(a - da, b - db)) / 2
+
+    dp_pred = np.dot(dpda, da) + np.dot(dpdb, db)
+
+    diff = np.abs(dp_fd - dp_pred)
+
+    print(f"dp_fd = {dp_fd}, dp_pred = {dp_pred}")
+    print(f"diff = {diff}")
+
+    d2pda2 = -2.0 * (np.outer(b, b) - np.dot(b, b) * np.eye(3))
+    d2pdb2 = -2.0 * (np.outer(a, a) - np.dot(a, a) * np.eye(3))
+    d2pdadb = -2.0 * (np.outer(b, a) - 2 * np.outer(a, b) + np.eye(3) * np.dot(a, b))
+
+    dp_disturb = molli(a + da, b + db) + molli(a - da, b - db) - 2 * p
+
+    dx = np.concatenate([da, db])
+    d2p = np.block([[d2pda2, d2pdadb],
+                    [d2pdadb.T, d2pdb2]])
+
+    dpdx = np.concatenate([dpda, dpdb])
+
+    
+    # dp_pred = p + np.dot(dpdx, dx) + 0.5 * np.dot(dx, np.dot(d2p, dx))
+    dp_pred = np.dot(np.dot(d2p, dx), dx)
+
+    print(f"dp_disturb = {dp_disturb}, dp_pred = {dp_pred}")
+
+    z3 = np.zeros((3,))
+    ref = ipctk.edge_edge_cross_squarednorm_hessian(z3, a, z3, b)
+    
+    ref = np.block([[
+        ref[3: 6, 3:6], ref[3:6, 9:12]],
+        [ref[9:12, 3:6], ref[9:12, 9:12]
+    ]])
+    print(f"ref = {ref}\nd2p = {d2p}\ndiff = {np.linalg.norm(ref - d2p)}")
+
+def eigs_decompose():
+    a = np.array([3, 0, 0], dtype = float)
+    b = np.array([0, 2, 0], dtype = float)
+
+    d2pda2 = -2.0 * (np.outer(b, b) - np.dot(b, b) * np.eye(3))
+    d2pdb2 = -2.0 * (np.outer(a, a) - np.dot(a, a) * np.eye(3))
+    d2pdadb = -2.0 * (np.outer(b, a) - 2 * np.outer(a, b) + np.eye(3) * np.dot(a, b))
+
+
+    d2p = np.block([[d2pda2, d2pdadb],
+                    [d2pdadb.T, d2pdb2]])
+
+    eigvals, eigvecs = np.linalg.eig(d2p)
+
+    '''
+    lam 0 = a^2
+    lam 1 = b^2
+    lam 2, 3 = +- ab
+    lam 4, 5 = 0.5 * ((a^2 + b^2) +- sqrt((a^2 + b^2)^2 - 12 * a^2 * b^2))
+    '''
+    
+    print(eigvals, eigvecs)
+
+if __name__ == "__main__":
+    # a = np.random.rand(3)
+    # b = np.random.rand(3)
+
+    # test(a, b)
+
+    eigs_decompose()
