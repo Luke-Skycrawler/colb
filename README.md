@@ -32,6 +32,16 @@ To run cosserat YLS, use:
 python -m cosserat.yarn
 ```
 
+
+To generate ee tests: 
+```
+python -m psd.gen_test_ee --n 5000 --out ee
+```
+
+To test against IPC Hessian:
+```
+python -m psd.ee_ipc
+```
 #### Performance
 
 Tested on RTX 3080. Python 3.10.14. YLS takes 5ms to simulate 1ms. 
@@ -49,3 +59,10 @@ Tested on RTX 3080. Python 3.10.14. YLS takes 5ms to simulate 1ms.
 [3]: A Unified Analysis of Penalty-Based Collision Energies
 [4]: Primal/Dual Descent Methods for Dynamics
 [5]: Vertex Block Descent
+
+
+#### Coding Agent Instructions 
+
+1. Don't create individual environments to run the scripts. A conda environment named base is created for you to run this script. Don't modify the packages inside the environment. 
+2. Use self defined "scalar" types in warp context so that all code supports switching between single and double precision easily.
+3. Warp does not do type conversion inside warp.kernel or warp.func, even between double and single float. Use explicit type conversion like scalar(1.0) for constants. 
