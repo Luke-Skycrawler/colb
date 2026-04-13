@@ -162,14 +162,14 @@ def test_full():
     z3 = np.zeros((3, 3))
     alpha = np.dot(a, b) / np.dot(a, a)
     dcdx = np.block([[I3, -alpha * I3],
-                    [z3, I3]])
+                    [z3, I3]]).T
     
     d2p_perp = mollifier_hessian(a, b - alpha * a)
-    d2p_proj = dcdx @ d2p_perp @ dcdx.T
+    d2p_proj = dcdx.T @ d2p_perp @ dcdx
     
     print(f"d2p = {np.linalg.norm(d2p)}\nd2p_proj = {np.linalg.norm(d2p_proj)}\ndiff = {np.linalg.norm(d2p - d2p_proj)}")
 
-    # A1 = dcdx_delta H dcdx_delta^T is indeed zero 
+    # A1 = dcdx_delta^T H dcdx_delta is indeed zero 
 
 
 if __name__ == "__main__":
