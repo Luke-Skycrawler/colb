@@ -74,10 +74,83 @@ def eigs_decompose():
     lam 0 = a^2
     lam 1 = b^2
     lam 2, 3 = +- ab
-    lam 4, 5 = 0.5 * ((a^2 + b^2) +- sqrt((a^2 + b^2)^2 - 12 * a^2 * b^2))
+    lam 4, 5 = 0.5 * ((a^2 + b^2) +- sqrt((a^2 + b^2)^2 + 12 * a^2 * b^2))
     '''
     
     print(eigvals, eigvecs)
+
+def eigs_analytical(e0, e1): 
+    a = e0 
+    alpha = np.dot(e0, e1) / np.dot(e0, e0)
+    b = e1 - alpha * e0
+    
+    n = np.cross(a, b)
+    n /= np.sqrt(np.dot(n, n))
+    
+    aa = np.sqrt(np.dot(a, a))
+    bb = np.sqrt(np.dot(b, b))
+    
+    lambdas = np.zeros((6,))
+    lambdas[0] = bb * bb
+    lambdas[1] = aa * aa
+    
+    lambdas[2] = aa * bb
+    lambdas[3] = -aa * bb
+
+    term = aa* aa + bb * bb
+    delta = term * term + 12 * aa * aa * bb * bb
+    lambdas[4] = 0.5 * (term + np.sqrt(delta))
+    lambdas[5] = 0.5 * (term - np.sqrt(delta))
+
+
+    qs = np.zeros((6, 6))
+    z3 = np.zeros((3,))
+
+    qs[:, 0] = np.concatenate([n, z3])
+    qs[:, 1] = np.concatenate([z3, n])
+    qs[:, 2] = np.concatenate([-b / bb, a / aa])
+    qs[:, 3] = np.concatenate([b / bb, a / aa])
+
+    for i in range(4, 6):
+        qs[:, i] = np.concatenate([2 * bb * a, (lambdas[i] / bb - bb) * b])
+    
+    for i in range(6): 
+        qs[:, i] /= np.linalg.norm(qs[:, i])
+    lambdas *= 2.0
+
+    d2p = mollifier_hessian(a, b)
+    eigvals, eigvecs = np.linalg.eig(d2p)
+
+    diff_eigsys = qs @ np.diag(lambdas) @ qs.T - d2p
+    diff_eigsys_norm = np.linalg.norm(diff_eigsys)
+
+    eigvals_sort = np.sort(eigvals)
+    lambdas_sort = np.sort(lambdas)
+
+    diff_vals = np.linalg.norm(eigvals_sort - lambdas_sort)
+
+    debug = False
+    if debug: 
+
+        # sort q columns according to the order of lambdas
+        idx = np.argsort(lambdas)
+        qs = qs[:, idx]
+        
+        # sort eigvecs according to the order of eigvals
+        idx_eig = np.argsort(eigvals)
+        eigvecs = eigvecs[:, idx_eig]
+
+        eigvals = eigvals_sort
+        lambdas = lambdas_sort
+
+
+
+        print(f"analytical lambdas = \n{lambdas}, \neigvals = \n\n{qs}\n\n\n\n")
+        print(f"numerical eigen values = \n{eigvals}, \neigvecs = \n\n{eigvecs}")
+
+    
+    print(f"analytical lambdas = \n{np.sort(lambdas)}\neigvals = \n{np.sort(eigvals)}, \ndiff eig vals = {diff_vals}, \ndiff_eigsys = {diff_eigsys_norm}")
+
 
 def test_full():
     a = np.array([3, 0, 0], dtype = float)
@@ -103,10 +176,14 @@ if __name__ == "__main__":
     a = np.random.rand(3)
     b = np.random.rand(3)
 
+    # a = np.array([2, 0, 0], dtype = float)
+    # b = np.array([0, 1, 0], dtype = float)
     # test(a, b)
 
     # eigs_decompose()
-    test_full()
+    # test_full()
+    eigs_analytical(a, b)
     # x = test(a, b)
     # y = test(a, b + a)
     # print(f"x y diff = {np.linalg.norm(x - y)}")
+
