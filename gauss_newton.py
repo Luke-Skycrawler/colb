@@ -227,6 +227,12 @@ def compute_contact_gh_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dt
         # wp.atomic_add(rhs, b0 * 2 + 1, -tau1)
         # wp.atomic_add(rhs, b1 * 2 + 1, -tau2)
 
+    else:
+        triplets.rows[i * 4 + 0 + n_bodies] = b0
+        triplets.cols[i * 4 + 0 + n_bodies] = b1
+
+        triplets.rows[i * 4 + 1 + n_bodies] = b1
+        triplets.cols[i * 4 + 1 + n_bodies] = b0
 @wp.func 
 def make_vec6(v: vec3, w: vec3) -> vec6:
     return vec6(v[0], v[1], v[2], w[0], w[1], w[2]) 
@@ -333,13 +339,12 @@ class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
 
     def to_csr(self, triplets: Triplets): 
         a = TripletsCSR() 
-        # nnz = (self.n_bodies + contact_volume * 4) * 36
-        nnz = (self.n_bodies) * 36
+        nnz = (self.n_bodies + self.n_contacts * 4) * 36
         a.rows = wp.zeros((nnz,), dtype = int)
         a.cols = wp.zeros_like(a.rows)
         a.vals = wp.zeros((nnz,), dtype = scalar)
 
-        wp.launch(bsr2csr, dim = nnz // 36, inputs = [triplets, a])
+        wp.launch(bsr2csr, dim = (nnz // 36,), inputs = [triplets, a])
 
         # prune numerical zeros off is necessary, because the direct solver will directly copy the first nnz values
         return bsr_from_triplets(self.n_bodies * 6, self.n_bodies * 6, a.rows, a.cols, a.vals, prune_numerical_zeros=False)
