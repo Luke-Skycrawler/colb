@@ -12,3 +12,5 @@ vec6 = wp.spatial_vectord
 
 mat34 = wp.types.matrix(shape = (3, 4), dtype = scalar)
 mat24 = wp.types.matrix(shape = (2, 4), dtype = scalar)
+mat12 = wp.types.matrix(shape = (12, 12), dtype = scalar)
+mat99 = wp.types.matrix(shape = (9, 9), dtype = scalar)

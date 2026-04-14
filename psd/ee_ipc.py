@@ -5,6 +5,7 @@ from psd.hl import signed_distance, eig_Hl_tid, gl
 
 from psd.ee import C_ee, dceedx_s
 from psd.barrier import *
+from psd.assemble import assemble
 import ipctk
 ipctk_ref = True
 
@@ -37,6 +38,13 @@ def _Q_lambda_ee(x: wp.array2d(dtype = vec3), q: wp.array2d(dtype = vec3), lam: 
     q[i, 4 * 3 + 1] = gl1 * scalar(2.0) * l
     q[i, 4 * 3 + 2] = gl2 * scalar(2.0) * l
 
+    for ii in range(5):         
+        sum = scalar(0.0)
+        for jj in wp.range(3):
+            sum += wp.length_sq(q[i, ii * 3 + jj])
+        sum = wp.sqrt(sum)
+        for jj in wp.range(3):
+            q[i, ii * 3 + jj] /= sum
 
 def ipc_term_ee():
     xnp = np.load("ee.npz")["x"]
@@ -51,6 +59,7 @@ def ipc_term_ee():
     Jej = wp.zeros((nee, ), dtype = mat24)
     x = wp.zeros((nee, 4), dtype = vec3)
     x.assign(xnp)
+    H = wp.zeros((nee, ), dtype = mat12)
 
 
     wp.launch(_Q_lambda_ee, dim = (nee, ), inputs = [x, Q, Lam])
@@ -59,6 +68,7 @@ def ipc_term_ee():
 
     wp.launch(extract_JeiJej, dim = (nee, ), inputs = [x, Jei, Jej])
     
+    wp.launch(assemble, dim = (nee, ), inputs = [dcdx, Q, Lam, H])
 
     Qnp = Q.numpy()
     Jeinp = Jei.numpy()
@@ -66,6 +76,7 @@ def ipc_term_ee():
     Lamnp = Lam.numpy()
     dcdxnp = dcdx.numpy()
     xnp = x.numpy()
+    Hnp = H.numpy()
 
     gnp = np.zeros((nee, 24))
 
@@ -84,6 +95,8 @@ def ipc_term_ee():
             qq = extract_Q(Qnp[i])
             Hl = QLQinv(qq, Lamnp[i])
             Hee = dcTHldc(dcdxnp[i], Hl)
+
+            Hee = Hnp[i]
 
             if ipctk_ref:
                 ei0 = xnp[i, 0]
@@ -138,10 +151,10 @@ def ipc_term_ee():
   
 
 def QLQinv(Q, lam):
-    QTQ = Q.T @ Q
-    diag_inv = np.array([(scalar(1.0) / QTQ[i, i]) for i in range(5)])
-    diag_inv = np.diag(diag_inv)
-    Q_inv = diag_inv @ Q.T
+    # QTQ = Q.T @ Q
+    # diag_inv = np.array([(1.0 / QTQ[i, i]) for i in range(5)])
+    # diag_inv = np.diag(diag_inv)
+    Q_inv = Q.T
     Lam = np.diag(lam)
     return Q @ Lam @ Q_inv
 
@@ -209,4 +222,5 @@ def _dcdx(x: wp.array2d(dtype = vec3), ret: wp.array(dtype = mat34)):
     ret[i] = dcdx_simple
 
 if __name__ == "__main__":
+    wp.init()
     ipc_term_ee()   
