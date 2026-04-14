@@ -40,10 +40,10 @@ def _Q_lambda_ee(x: wp.array2d(dtype = vec3), q: wp.array2d(dtype = vec3), lam: 
 
     for ii in range(5):         
         sum = scalar(0.0)
-        for jj in wp.range(3):
+        for jj in range(3):
             sum += wp.length_sq(q[i, ii * 3 + jj])
         sum = wp.sqrt(sum)
-        for jj in wp.range(3):
+        for jj in range(3):
             q[i, ii * 3 + jj] /= sum
 
 def ipc_term_ee():

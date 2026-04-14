@@ -1,6 +1,6 @@
 import warp as wp 
 import numpy as np
-# from .vf import C_vf, dcvfdx_s, dcdx_delta_vf
+from .pt import C_vf, dcvfdx_s, dcdx_delta_vf
 from .ee import C_ee, dceedx_s, dcdx_delta_ee
 from scalar_types import *
 
@@ -38,35 +38,35 @@ def gl(l: scalar, e2o: vec3):
     return z3, z3, e2o * l / wp.length_sq(e2o)
 
 
-# @wp.kernel
-# def test_vf(x: wp.array(dtype = vec3), dcdx_delta: wp.array2d(dtype = mat33), ret: wp.array2d(dtype = mat33), d2Psi: wp.array2d(dtype = mat33), mat34: wp.array2d(dtype = scalar)):
-#     i = wp.tid()
-#     x0 = x[i * 4 + 0]
-#     x1 = x[i * 4 + 1]
-#     x2 = x[i * 4 + 2]
-#     x3 = x[i * 4 + 3]
+@wp.kernel
+def test_vf(x: wp.array(dtype = vec3), dcdx_delta: wp.array2d(dtype = mat33), ret: wp.array2d(dtype = mat33), d2Psi: wp.array2d(dtype = mat33), mat34: wp.array2d(dtype = scalar)):
+    i = wp.tid()
+    x0 = x[i * 4 + 0]
+    x1 = x[i * 4 + 1]
+    x2 = x[i * 4 + 2]
+    x3 = x[i * 4 + 3]
 
-#     e0p, e1p, e2p = C_vf(x0, x1, x2, x3)
-#     dcdx_delta_vf(x0, x1, x2, x3, dcdx_delta)
-#     dcdx_simple = dcvfdx_s(x0, x1, x2, x3)
-#     for ii in range(3):
-#         for jj in range(4):
-#             mat34[ii, jj] = dcdx_simple[ii, jj]
-#     l = signed_distance(e0p, e1p, e2p)
-#     Hl00, Hl11, Hl02, Hl12 = Hl(e0p, e1p, e2p)
-#     gl0, gl1, gl2 = gl(l, e2p)
-#     # gx = simpleTerm' * gl * 2 * l;
+    e0p, e1p, e2p = C_vf(x0, x1, x2, x3)
+    dcdx_delta_vf(x0, x1, x2, x3, dcdx_delta)
+    dcdx_simple = dcvfdx_s(x0, x1, x2, x3)
+    for ii in range(3):
+        for jj in range(4):
+            mat34[ii, jj] = dcdx_simple[ii, jj]
+    l = signed_distance(e0p, e1p, e2p)
+    Hl00, Hl11, Hl02, Hl12 = Hl(e0p, e1p, e2p)
+    gl0, gl1, gl2 = gl(l, e2p)
+    # gx = simpleTerm' * gl * 2 * l;
 
-#     # d2Psi = 2 * l * Hl + 2 * gl * gl.T
-#     d2Psi[0, 0] = scalar(scalar(2.0)) * l * Hl00 + scalar(scalar(2.0)) * wp.outer(gl0, gl0)
-#     d2Psi[0, 1] = scalar(scalar(2.0)) * wp.outer(gl0, gl1)
-#     d2Psi[0, 2] = scalar(scalar(2.0)) * l * Hl02 + scalar(scalar(2.0)) * wp.outer(gl0, gl2)
-#     d2Psi[1, 0] = scalar(scalar(2.0)) * wp.outer(gl1, gl0)
-#     d2Psi[1, 1] = scalar(scalar(2.0)) * l * Hl11 + scalar(scalar(2.0)) * wp.outer(gl1, gl1)
-#     d2Psi[1, 2] = scalar(scalar(2.0)) * l * Hl12 + scalar(scalar(2.0)) * wp.outer(gl1, gl2)
-#     d2Psi[2, 0] = scalar(scalar(2.0)) * l * wp.transpose(Hl02) + scalar(scalar(2.0)) * wp.outer(gl2, gl0)
-#     d2Psi[2, 1] = scalar(scalar(2.0)) * l * wp.transpose(Hl12) + scalar(scalar(2.0)) * wp.outer(gl2, gl1)
-#     d2Psi[2, 2] = scalar(scalar(2.0)) * wp.outer(gl2, gl2)
+    # d2Psi = 2 * l * Hl + 2 * gl * gl.T
+    d2Psi[0, 0] = scalar(scalar(2.0)) * l * Hl00 + scalar(scalar(2.0)) * wp.outer(gl0, gl0)
+    d2Psi[0, 1] = scalar(scalar(2.0)) * wp.outer(gl0, gl1)
+    d2Psi[0, 2] = scalar(scalar(2.0)) * l * Hl02 + scalar(scalar(2.0)) * wp.outer(gl0, gl2)
+    d2Psi[1, 0] = scalar(scalar(2.0)) * wp.outer(gl1, gl0)
+    d2Psi[1, 1] = scalar(scalar(2.0)) * l * Hl11 + scalar(scalar(2.0)) * wp.outer(gl1, gl1)
+    d2Psi[1, 2] = scalar(scalar(2.0)) * l * Hl12 + scalar(scalar(2.0)) * wp.outer(gl1, gl2)
+    d2Psi[2, 0] = scalar(scalar(2.0)) * l * wp.transpose(Hl02) + scalar(scalar(2.0)) * wp.outer(gl2, gl0)
+    d2Psi[2, 1] = scalar(scalar(2.0)) * l * wp.transpose(Hl12) + scalar(scalar(2.0)) * wp.outer(gl2, gl1)
+    d2Psi[2, 2] = scalar(scalar(2.0)) * wp.outer(gl2, gl2)
 
 @wp.kernel
 def test_ee(x: wp.array(dtype = vec3), dcdx_delta: wp.array2d(dtype = mat33), ret: wp.array2d(dtype = mat33), d2Psi: wp.array2d(dtype = mat33), mat34: wp.array2d(dtype = scalar)):
@@ -216,28 +216,28 @@ def verify_eig_sys_ee(x: wp.array(dtype = vec3), q: wp.array2d(dtype = vec3), la
     q[4, 1] = gl1
     q[4, 2] = gl2
 
-# @wp.kernel
-# def verify_eig_sys_vf(x: wp.array(dtype = vec3), q: wp.array2d(dtype = vec3), lam: wp.array2d(dtype = scalar)):
-#     i = wp.tid()
-#     x0 = x[i * 9 + 0]
-#     x1 = x[i * 9 + 1]
-#     x2 = x[i * 9 + 2]
-#     x3 = x[i * 9 + 3]
+@wp.kernel
+def verify_eig_sys_vf(x: wp.array(dtype = vec3), q: wp.array2d(dtype = vec3), lam: wp.array2d(dtype = scalar)):
+    i = wp.tid()
+    x0 = x[i * 9 + 0]
+    x1 = x[i * 9 + 1]
+    x2 = x[i * 9 + 2]
+    x3 = x[i * 9 + 3]
 
-#     e0p, e1p, e2p = C_vf(x0, x1, x2, x3)
-#     lam0, lam1, lam2, lam3 = eig_Hl(e0p, e1p, e2p, q)
-#     l = signed_distance(e0p, e1p, e2p)
+    e0p, e1p, e2p = C_vf(x0, x1, x2, x3)
+    lam0, lam1, lam2, lam3 = eig_Hl(e0p, e1p, e2p, q)
+    l = signed_distance(e0p, e1p, e2p)
 
-#     lam[i, 0] = lam0
-#     lam[i, 1] = lam1
-#     lam[i, 2] = lam2
-#     lam[i, 3] = lam3
-#     lam[i, 4] = scalar(scalar(2.0))
+    lam[i, 0] = lam0
+    lam[i, 1] = lam1
+    lam[i, 2] = lam2
+    lam[i, 3] = lam3
+    lam[i, 4] = scalar(scalar(2.0))
 
-#     gl0, gl1, gl2 = gl(l, e2p)
-#     q[4, 0] = gl0
-#     q[4, 1] = gl1
-#     q[4, 2] = gl2
+    gl0, gl1, gl2 = gl(l, e2p)
+    q[4, 0] = gl0
+    q[4, 1] = gl1
+    q[4, 2] = gl2
 
 def project_psd(A, Q, Lambda):
     n = A.shape[0]
