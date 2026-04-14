@@ -14,3 +14,7 @@ mat34 = wp.types.matrix(shape = (3, 4), dtype = scalar)
 mat24 = wp.types.matrix(shape = (2, 4), dtype = scalar)
 mat12 = wp.types.matrix(shape = (12, 12), dtype = scalar)
 mat99 = wp.types.matrix(shape = (9, 9), dtype = scalar)
+
+@wp.func 
+def make_vec6(v: vec3, w: vec3) -> vec6:
+    return vec6(v[0], v[1], v[2], w[0], w[1], w[2]) 

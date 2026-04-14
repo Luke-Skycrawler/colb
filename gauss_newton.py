@@ -223,9 +223,6 @@ def compute_contact_gh_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dt
         # wp.atomic_add(rhs, b0 * 2 + 1, -tau1)
         # wp.atomic_add(rhs, b1 * 2 + 1, -tau2)
 
-@wp.func 
-def make_vec6(v: vec3, w: vec3) -> vec6:
-    return vec6(v[0], v[1], v[2], w[0], w[1], w[2]) 
 
 @wp.kernel
 def compute_inertia_gh_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dtype = Inertia), triplets: Triplets, rhs: wp.array(dtype = vec6), dt: scalar):
