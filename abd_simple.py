@@ -38,10 +38,11 @@ def compute_V(geo: Soup, history: wp.array(dtype = BDFAffine)):
 def init(history: wp.array(dtype = BDFAffine), p: wp.array(dtype = vec3), mass: wp.array(dtype = Inertia)):    
     i = wp.tid()
     z = scalar(0.0)
+    o = scalar(3.0)
     history[i].now.c = vec3(scalar(p[i].x), scalar(p[i].y), scalar(p[i].z))
     history[i].now.q = wp.identity(3, dtype = scalar)
     history[i].now.v = vec3(z, z, z)
-    history[i].now.qdot = wp.zeros((3, 3), dtype = scalar)
+    history[i].now.qdot = mat33(z, o, z, -o, z, z, z, z, z)
 
     history[i].nxt = history[i].now
 
