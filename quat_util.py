@@ -37,6 +37,12 @@ class RigidState:
     w: vec4
     omega: vec3
 
+@wp.struct 
+class AffineState: 
+    c: vec3
+    q: mat33
+    v: vec3 
+    qdot: mat33
 
 @wp.func
 def dGdqx(): 

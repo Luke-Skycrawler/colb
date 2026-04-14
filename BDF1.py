@@ -1,5 +1,5 @@
 import warp as wp 
-from quat_util import RigidState, scalar, vec3, vec4, mat33, mat44, quat_mult
+from quat_util import RigidState, scalar, vec3, vec4, mat33, mat44, quat_mult, AffineState
 @wp.struct 
 class BDFHistory: 
     '''
@@ -8,6 +8,11 @@ class BDFHistory:
     now: RigidState
     nxt: RigidState
 
+@wp.struct 
+class BDFAffine: 
+    now: AffineState
+    nxt: AffineState
+    
 @wp.func 
 def cdot(history: BDFHistory, dt: scalar) -> vec3:
     '''
