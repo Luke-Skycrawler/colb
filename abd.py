@@ -15,14 +15,13 @@ from stvk import hessian_ortho, grad_ortho, energy_ortho
 solver_config = "direct"
 gravity = -9.8
 stiffness = 4e4
+from ortho import Triplets, InertialEnergy
+
+wp.config.max_unroll = 1
+wp.config.enable_backward = False
 def ptr(arr):
     return arr.__cuda_array_interface__['data'][0]
     
-@wp.struct
-class Triplets:
-    rows: wp.array(dtype=int)
-    cols: wp.array(dtype=int)
-    vals: wp.array(dtype=mat12)
 
 @wp.func 
 def compute_u_minus_utilde(pi: BDFAffine, dt: scalar): 
@@ -39,40 +38,40 @@ def make_vec12(v: vec3, qdot: mat33):
     return vec12(v.x, v.y, v.z, qdot[0][0], qdot[0][1], qdot[0][2], qdot[1][0], qdot[1][1], qdot[1][2], qdot[2][0], qdot[2][1], qdot[2][2])
 
 
-@wp.kernel
-def compute_inertia_gh_kernel(p: wp.array(dtype = BDFAffine), mass: wp.array(dtype = Inertia), triplets: Triplets, rhs: wp.array(dtype = vec12), dt: scalar):
-    i = wp.tid()
-    o = scalar(1.0)
-    z = scalar(0.0)
-    mi = mass[i].m
+# @wp.kernel
+# def compute_inertia_gh_kernel(p: wp.array(dtype = BDFAffine), mass: wp.array(dtype = Inertia), triplets: Triplets, rhs: wp.array(dtype = vec12), dt: scalar):
+#     i = wp.tid()
+#     o = scalar(1.0)
+#     z = scalar(0.0)
+#     mi = mass[i].m
 
-    triplets.rows[i] = i
-    triplets.cols[i] = i
+#     triplets.rows[i] = i
+#     triplets.cols[i] = i
 
-    if mi > z: 
-        Ji = mass[i].J
-        du, dqdot = compute_u_minus_utilde(p[i], dt)
-        grad = make_vec12(mi * du, Ji * dqdot)
-        for ii in range(3):
-            fi = grad_ortho(ii, p[i]) * dt * dt
-            for mm in range(3):
-                grad[3 + ii * 3 + mm] -= fi[mm]
+#     if mi > z: 
+#         Ji = mass[i].J
+#         du, dqdot = compute_u_minus_utilde(p[i], dt)
+#         grad = make_vec12(mi * du, Ji * dqdot)
+#         for ii in range(3):
+#             fi = -grad_ortho(ii, p[i]) * dt
+#             for mm in range(3):
+#                 grad[3 + ii * 3 + mm] -= fi[mm]
 
-        rhs[i] += grad
-        block = wp.diag(vec12(mi, mi, mi, Ji, Ji, Ji, Ji, Ji, Ji, Ji, Ji, Ji))
+#         rhs[i] += grad
+#         block = wp.diag(vec12(mi, mi, mi, Ji, Ji, Ji, Ji, Ji, Ji, Ji, Ji, Ji))
         
-        for ii in range(3):
-            for jj in range(3):
-                dh = hessian_ortho(ii, jj, p[i]) * dt * dt
+#         for ii in range(3):
+#             for jj in range(3):
+#                 dh = hessian_ortho(ii, jj, p[i]) * dt
 
-                for mm in range(3):
-                    for nn in range(3):
-                        block[3 + ii * 3 + mm][3 + jj * 3 + nn] += dh[mm][nn]
+#                 for mm in range(3):
+#                     for nn in range(3):
+#                         block[3 + ii * 3 + mm][3 + jj * 3 + nn] += dh[mm][nn]
                         
-        triplets.vals[i] = block
-    else:
-        triplets.vals[i] = wp.identity(12, dtype = scalar)
-        rhs[i] = vec12(z)
+#         triplets.vals[i] = block
+#     else:
+#         triplets.vals[i] = wp.identity(12, dtype = scalar)
+#         rhs[i] = vec12(z)
 
 @wp.kernel
 def bsr2csr(triplets_BSR: Triplets, triplets_CSR: TripletsCSR):
@@ -179,14 +178,15 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         LineSearchInterface.__init__(self)
 
         triplets = Triplets()
-        nnz = self.n_bodies + contact_volume * 4
+        nnz = (self.n_bodies + contact_volume * 4) * 16
         triplets.rows = wp.zeros((nnz,), dtype = int)
         triplets.cols = wp.zeros_like(triplets.rows)
-        triplets.vals = wp.zeros((nnz,), dtype = mat12)
+        triplets.vals = wp.zeros((nnz,), dtype = mat33)
 
-        self.rhs = wp.zeros((self.n_bodies,), dtype = vec12)
+        self.rhs = wp.zeros((self.n_bodies * 4,), dtype = vec3)
         self.du = wp.zeros_like(self.rhs)
         self.triplets = triplets
+        self.e_inertia = InertialEnergy()
 
     def compute_contact_gh(self):
         return 
@@ -203,15 +203,15 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
 
     def to_csr(self, triplets: Triplets): 
         a = TripletsCSR() 
-        nnz = (self.n_bodies) * 144
+        nnz = (self.n_bodies) * 9
         a.rows = wp.zeros((nnz,), dtype = int)
         a.cols = wp.zeros_like(a.rows)
         a.vals = wp.zeros((nnz,), dtype = scalar)
 
-        wp.launch(bsr2csr, dim = nnz // 144, inputs = [triplets, a])
+        wp.launch(bsr2csr, dim = nnz // 9, inputs = [triplets, a])
 
         # prune numerical zeros off is necessary, because the direct solver will directly copy the first nnz values
-        return bsr_from_triplets(self.n_bodies * 12, self.n_bodies * 12, a.rows, a.cols, a.vals, prune_numerical_zeros=False)
+        return bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, a.rows, a.cols, a.vals, prune_numerical_zeros=False)
 
     def to_scipy_csr(self, mat):
         ii = mat.offsets.numpy()
@@ -225,7 +225,7 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
     def compute_du(self, iter):
         self.du.zero_()
         if solver_config == "cg": 
-            A = bsr_from_triplets(self.n_bodies, self.n_bodies, self.triplets.rows, self.triplets.cols, self.triplets.vals)
+            A = bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, self.triplets.rows, self.triplets.cols, self.triplets.vals)
             cg(A, self.rhs, self.du, tol = 1e-5)
         else: 
             A_csr = self.to_csr(self.triplets)
@@ -253,19 +253,21 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
             with wp.ScopedTimer("newton step"):
                 newton = True
                 iter = 0
-                max_iter = 16
+                max_iter = 10
                 self.detect_collision()
                 while newton: 
                     # self.compute_contact_gh()
-                    self.compute_inertia_gh()
+                    # self.compute_inertia_gh()
+                    self.e_inertia.gradient(self.rhs, self.history)
+                    self.e_inertia.hessian(self.triplets, self.history)
                     
-                    du_norm = self.compute_du(iter) 
+                    dq_norm = self.compute_dq(iter) 
                     alpha = self.line_search()
                     # alpha = self.line_search_batch()
                     iter += 1
-                    print(f"    iter: {iter}, du norm: {du_norm}, alpha = {alpha}")
-                    newton = not (du_norm < 1e-5 or iter >= max_iter)
-            
+                    print(f"    iter: {iter}, dq norm: {dq_norm}, alpha = {alpha}")
+                    newton = not (dq_norm < 1e-5 or iter >= max_iter)
+                    
                 self.forward_states()
 
     def line_search_iterative(self):
@@ -280,8 +282,16 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
 
         return alpha
 
+    def compute_dq(self, iter): 
+        hess = bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, self.triplets.rows, self.triplets.cols, self.triplets.vals)
+        
+        cg(hess, self.rhs, self.du, tol = 1e-5)
+        return np.max(np.abs(self.du.numpy()))
+        
+
     def add_du(self, alpha):
-        wp.launch(add_vec12_du_kernel, dim = (self.n_bodies,), inputs = [self.du, self.history, alpha, self.dt])
+        # wp.launch(add_vec12_du_kernel, dim = (self.n_bodies,), inputs = [self.du, self.history, alpha, self.dt])
+        wp.launch(add_du_kernel, dim = (self.n_bodies,), inputs = [self.du, self.history, alpha, self.dt])
 
     def get_contact_points(self):
         # wp.launch(get_contact_points, (self.n_contacts,), inputs = [self.history, self.soup, self.contacts_new.list, self.contact_ret])
@@ -293,23 +303,30 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         # magnitudes = np.abs(dists[valid] - thickness * 2.0)
         return np.zeros((0, 3)), np.zeros((0,))
         return points[valid], magnitudes
+
 @wp.func
 def apply_du(du: vec3, dw: mat33, _state: BDFAffine, alpha: scalar, dt: scalar): 
     state = BDFAffine()
     state = _state
-    state.nxt.v -= alpha * du 
-    state.nxt.c = state.now.c + dt * state.nxt.v
+    state.nxt.c -= alpha * du 
     
-    state.nxt.qdot -= alpha * dw
-    state.nxt.q = state.now.q + state.nxt.qdot * dt
-
+    state.nxt.q -= alpha * dw
+    
     return state
 
-@wp.kernel
-def add_vec12_du_kernel(du: wp.array(dtype = vec12), history: wp.array(dtype = BDFAffine), alpha: scalar, dt: scalar):
+# @wp.kernel
+# def add_vec12_du_kernel(du: wp.array(dtype = vec12), history: wp.array(dtype = BDFAffine), alpha: scalar, dt: scalar):
+#     i = wp.tid()
+#     # n_bodies = history.shape[0]
+#     dui = du[i]
+#     u = vec3(dui[0], dui[1], dui[2])
+#     qdot = mat33(dui[3], dui[4], dui[5], dui[6], dui[7], dui[8], dui[9], dui[10], dui[11])
+#     history[i] = apply_du(u, qdot, history[i], alpha, dt)
+
+
+@wp.kernel 
+def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFAffine), alpha: scalar, dt: scalar):
     i = wp.tid()
-    # n_bodies = history.shape[0]
     dui = du[i]
-    u = vec3(dui[0], dui[1], dui[2])
-    qdot = mat33(dui[3], dui[4], dui[5], dui[6], dui[7], dui[8], dui[9], dui[10], dui[11])
-    history[i] = apply_du(u, qdot, history[i], alpha, dt)
+    dq = wp.matrix_from_cols(du[i * 4 + 1], du[i * 4 + 2], du[i * 4 + 3])
+    history[i] = apply_du(dui, dq, history[i], alpha, dt)

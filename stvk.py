@@ -2,7 +2,7 @@ import warp as wp
 from scalar_types import *
 from BDF1 import BDFAffine, AffineState
 from rbd_simple import Inertia
-kappa = scalar(1e5)
+kappa = scalar(1e6)
 @wp.func
 def energy_ortho(state: BDFAffine) -> scalar:
     q = state.nxt.q
