@@ -59,11 +59,24 @@ def to_adjacency_csr(constraints: wp.array(dtype = XConstraint), triplets: CSRTr
     c = constraints[i]
     b0, b1 = fetch_b0b1(c, soup)
     
-    triplets.rows[i * 2 + 0] = b0
-    triplets.cols[i * 2 + 0] = b1
+    if b0 != b1: 
+        triplets.rows[i * 2 + 0] = b0
+        triplets.cols[i * 2 + 0] = b1
 
-    triplets.rows[i * 2 + 1] = b1
-    triplets.cols[i * 2 + 1] = b0
+        triplets.rows[i * 2 + 1] = b1
+        triplets.cols[i * 2 + 1] = b0
+
+@wp.kernel
+def verify_coloring(offsets: wp.array(dtype = int), indices: wp.array(dtype = int), colors: wp.array(dtype = int), cnt_invalid: wp.array(dtype = int)):
+    i = wp.tid() 
+    # if colors[i] == 0:
+    #     cnt_invalid[0] = 1
+    
+    for ii in range(offsets[i], offsets[i + 1]):
+        j = indices[ii]
+        if i != j and colors[i] == colors[j]:
+            # cnt_invalid[0] = 1
+            wp.atomic_add(cnt_invalid, 0, 1)
 
 @wp.kernel
 def gunrocks(node_values: wp.array(dtype = int), offsets: wp.array(dtype = int), indices: wp.array(dtype = int), colors_in: wp.array(dtype = int), colors_out: wp.array(dtype = int), sweep: int, cnt_uncolored: wp.array(dtype = int)):
@@ -77,7 +90,7 @@ def gunrocks(node_values: wp.array(dtype = int), offsets: wp.array(dtype = int),
         for ii in range(offsets[i], offsets[i + 1]):
             j = indices[ii]
 
-            if colors_in[j] == 0:
+            if j != i and colors_in[j] == 0:
                 vj = node_values[j]
                 # Break equal-priority ties by index so every uncolored node has a strict order.
                 if (vj < vi) or (vj == vi and j < i):
@@ -129,6 +142,23 @@ class VBDRbd(PrimalRbd):
                 break 
             colors_in, colors_out = colors_out, colors_in
         print(f"colorization done in {sweep} sweeps")
+
+        cnt_invalid = wp.zeros((1,), dtype = int)
+        wp.launch(verify_coloring, dim = (self.n_bodies,), inputs = [adj.offsets, adj.columns, self.colors, cnt_invalid])
+        invalid = cnt_invalid.numpy()[0]
+        if invalid: 
+
+            # print trace 
+            offsets = adj.offsets.numpy()
+            indices = adj.columns.numpy()
+            
+            colors = self.colors.numpy()
+
+            print(f"offsets = {offsets}")
+            print(f"indices = {indices}")
+            print(f"colors = {colors}")
+            print(f"coloring invalid!")
+            quit()
         return sweep * 2
 
     def define_color(self):
@@ -151,22 +181,29 @@ class VBDRbd(PrimalRbd):
 
 
     def step(self):
-        for ss in range(1):
-            newton = True
-            iter = 0
-            max_iter = 16
-            self.detect_collision()
-            n_colors = self.colorization()
-            while newton: 
-                for color in range(1, n_colors + 1):
-                # for color in range(3):
-                    self.compute_preconditioner()
-                    self.compute_rhs()
-                    
-                    du_norm = self.compute_du() 
-                    self.add_du(self.alpha, color)
-                iter += 1
-                print(f"    iter: {iter}, du norm: {du_norm}")
-                newton = not (du_norm < 1e-5 or iter >= max_iter)
-        
-            self.forward_states()
+        for ss in range(10):
+
+            with wp.ScopedTimer("step"):
+                newton = True
+                iter = 0
+                max_iter = 2
+                self.detect_collision()
+                with wp.ScopedTimer("colorization"):
+                    n_colors = self.colorization()
+                while newton: 
+
+                    # shuffle_colors = np.random.permutation(n_colors) + 1
+                    shuffle_colors = range(1, n_colors + 1) if iter % 2 == 0 else range(n_colors, 0, -1)
+                    # for color in range(1, n_colors + 1):
+                    # for color in range(3):
+                    for color in shuffle_colors:
+                        self.compute_preconditioner()
+                        self.compute_rhs()
+                        
+                        du_norm = self.compute_du() 
+                        self.add_du(self.alpha, color)
+                    iter += 1
+                    print(f"    iter: {iter}, du norm: {du_norm}")
+                    newton = not (du_norm < 1e-5 or iter >= max_iter)
+            
+                self.forward_states()

@@ -41,7 +41,7 @@ Tested on RTX 3080. Python 3.10.14. YLS takes 5ms to simulate 1ms.
 | xpbd                              |~ 1ms    | 2ms       | 2          | true |
 | preconditioned gradient descent   | ~2ms    | 8ms       | 16          | true |
 |PGD (w/ line search)               | ~5ms     | 8ms       | 16          | true |
-|vbd                                | ~5ms     | 8ms        | 16         | true |
+|vbd                                | ~5ms     | 4ms        | 2         | true |
 #### Reference
 
 [1]: Detailed Rigid Body Simulation with Extended Position Based Dynamics
