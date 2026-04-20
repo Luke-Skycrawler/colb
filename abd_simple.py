@@ -43,7 +43,8 @@ def init(history: wp.array(dtype = BDFAffine), p: wp.array(dtype = vec3), mass: 
     history[i].now.q = wp.identity(3, dtype = scalar)
     history[i].now.v = vec3(z, z, z)
     # history[i].now.qdot = mat33(z, o, z, -o, z, z, z, z, z)
-    history[i].now.qdot = wp.skew(vec3(o, z, z))
+    history[i].now.qdot = wp.skew(vec3(o, o, z))
+    # history[i].now.qdot = mat33(z)
 
     history[i].nxt = history[i].now
 

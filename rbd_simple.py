@@ -42,7 +42,8 @@ def init(history: wp.array(dtype = BDFHistory), p: wp.array(dtype = wp.vec3), ma
 @wp.kernel
 def _set_inertia_kernel(meta: wp.array(dtype = Inertia), m: wp.array(dtype = scalar)):
     i = wp.tid()
-    meta[i].m = wp.max(m[i], scalar(0.0))
+    # meta[i].m = wp.max(m[i], scalar(0.0))
+    meta[i].m = m[i]
     # meta[i].J = mat33(scalar(0.4) * meta[i].m * length * length)
     meta[i].J = scalar(0.4) * meta[i].m * length * length
 

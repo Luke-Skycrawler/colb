@@ -6,15 +6,21 @@ from contact import ContactSolverBase, contact_volume, XConstraint, fetch_b0b1
 from gauss_newton import LineSearchInterface, TripletsCSR
 from scipy.sparse import csr_matrix
 from warp.sparse import bsr_from_triplets
-from warp.optim.linear import cg
+from warp.optim.linear import cg, bicgstab
 from BDF1 import BDFAffine, AffineState
 import dxslv
 import numpy as np 
 from geometry import Soup
-from ortho import Triplets, InertialEnergy, gravity
+from ortho import energy_ortho, grad_ortho, hessian_ortho
+@wp.struct
+class Triplets:
+    rows: wp.array(dtype=int)
+    cols: wp.array(dtype=int)
+    vals: wp.array(dtype=mat33)
 
-solver_config = "direct"
+solver_config = "cg"
 stiffness = 4e4
+gravity = scalar(0.0)
 
 wp.config.max_unroll = 1
 wp.config.enable_backward = False
@@ -35,6 +41,112 @@ def bsr2csr(triplets_BSR: Triplets, triplets_CSR: TripletsCSR):
             triplets_CSR.rows[i * 9 + ii * 3 + jj] = r + ii
             triplets_CSR.cols[i * 9 + ii * 3 + jj] = c + jj
             triplets_CSR.vals[i * 9 + ii * 3 + jj] = v[ii][jj]
+
+
+@wp.kernel
+def energy_inertia(states: wp.array(dtype = BDFAffine), e: wp.array(dtype = scalar), inertia: wp.array(dtype = Inertia), dt: scalar):
+    i = wp.tid()
+    state = states[i]
+
+    
+    A_tilde = tildeA(state.now.q, state.now.qdot, dt)
+    p_tilde = tildep(state.now.c, state.now.v, dt)
+    
+    dqTMdq = norm_M(inertia[i], state.nxt.q, state.nxt.c, A_tilde, p_tilde)
+    de = energy_ortho(state.nxt.q) * dt * dt + scalar(0.5) * dqTMdq
+    wp.atomic_add(e, 0, de)
+
+@wp.func
+def norm_M(inertia: Inertia, A: mat33, p: vec3, A_tilde: mat33, p_tilde: vec3) -> scalar:
+    dq0 = p - p_tilde
+    dq1 = A[0] - A_tilde[0]
+    dq2 = A[1] - A_tilde[1]
+    dq3 = A[2] - A_tilde[2]
+    mass = inertia.m
+    I0 = inertia.J
+    return wp.dot(dq0, dq0) * mass + (wp.dot(dq1, dq1) + wp.dot(dq2, dq2) + wp.dot(dq3, dq3)) * I0
+
+
+@wp.kernel
+def bsr_hessian_inertia(triplets: Triplets, states: wp.array(dtype = BDFAffine), inertia: wp.array(dtype = Inertia), dt: scalar):
+    i = wp.tid()
+    # os = offset(i, i, bsr)
+    os = i * 16
+    mass = inertia[i].m
+    I0 = inertia[i].J
+    for ii in range(4):
+        for jj in range(4):
+            m = wp.where(ii == jj, wp.where(ii == 0, mass, I0), scalar(0.0))
+            I = vec3(m)
+            dh =wp.diag(I)
+            if ii > 0 and jj > 0:
+                dh += hessian_ortho(ii - 1, jj - 1, states[i].nxt.q) * dt * dt
+
+            triplets.rows[os + ii + jj * 4] = i * 4 + ii
+            triplets.cols[os + ii + jj * 4] = i * 4 + jj
+            triplets.vals[os + ii + jj * 4] = dh
+
+
+@wp.kernel
+def inertia_grad_hess(g: wp.array(dtype = vec3), triplets: Triplets, states: wp.array(dtype = BDFAffine), inertia: wp.array(dtype = Inertia), dt: scalar):
+    i = wp.tid()
+    os = i * 16
+    mass = inertia[i].m
+    I0 = inertia[i].J
+
+    if mass > scalar(0.0):
+        state = states[i]
+        for ii in range(1, 4):
+            g[ii + i * 4] = dt * dt * grad_ortho(ii - 1, state.nxt.q)
+
+        A_tilde = tildeA(state.now.q, state.now.qdot, dt)
+        p_tilde = tildep(state.now.c, state.now.v, dt)
+        q0, q1, q2, q3 = Mdq(state.nxt.q, state.nxt.c, A_tilde, p_tilde, inertia[i])
+
+        g[0 + i * 4] += q0
+        g[1 + i * 4] += q1
+        g[2 + i * 4] += q2
+        g[3 + i * 4] += q3
+
+        for ii in range(4):
+            for jj in range(4):
+                m = wp.where(ii == jj, wp.where(ii == 0, mass, I0), scalar(0.0))
+                I = vec3(m)
+                dh =wp.diag(I)
+                if ii > 0 and jj > 0:
+                    dh += hessian_ortho(ii - 1, jj - 1, states[i].nxt.q) * dt * dt
+
+                triplets.rows[os + ii + jj * 4] = i * 4 + ii
+                triplets.cols[os + ii + jj * 4] = i * 4 + jj
+                triplets.vals[os + ii + jj * 4] = dh
+    # else: 
+    #     for ii in range(4):
+    #         for jj in range(4):
+    #             triplets.rows[os + ii + jj * 4] = i * 4 + ii
+    #             triplets.cols[os + ii + jj * 4] = i * 4 + jj
+    #             if ii == jj:
+    #                 triplets.vals[os + ii + jj * 4] = wp.identity(3, dtype = scalar) * scalar(100.0)
+    #             else:
+    #                 triplets.vals[os + ii + jj * 4] = mat33(scalar(0.0))
+    #         g[ii + i * 4] = vec3(scalar(0.0))
+@wp.func
+def Mdq(A: mat33, p: vec3, A_tilde: mat33, p_tilde: vec3, inertia: Inertia):
+    q0 = p - p_tilde
+    q1 = A[0] - A_tilde[0]
+    q2 = A[1] - A_tilde[1]
+    q3 = A[2] - A_tilde[2]
+    mass = inertia.m
+    I0 = inertia.J
+    return q0 * mass, q1 * I0, q2 * I0, q3 * I0
+
+@wp.func
+def tildeA(A0: mat33, Adot: mat33, dt: scalar) -> mat33:
+    return A0 + dt * Adot
+
+@wp.func
+def tildep(p0: vec3, pdot: vec3, dt: scalar) -> vec3:
+    return p0 + dt * pdot + dt * dt * vec3(scalar(0.0), gravity, scalar(0.0))
+
 
 # @wp.kernel
 # def compute_contact_gh_kernel(p: wp.array(dtype = BDFAffine), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), triplets: Triplets, rhs: wp.array(dtype = vec12), dt: scalar):
@@ -136,7 +248,6 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         self.rhs = wp.zeros((self.n_bodies * 4,), dtype = vec3)
         self.du = wp.zeros_like(self.rhs)
         self.triplets = triplets
-        self.e_inertia = InertialEnergy(h)
 
     def compute_contact_gh(self):
         return 
@@ -172,7 +283,8 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         self.du.zero_()
         if solver_config == "cg": 
             A = bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, self.triplets.rows, self.triplets.cols, self.triplets.vals)
-            cg(A, self.rhs, self.du, tol = 1e-5)
+            # cg(A, self.rhs, self.du, tol = 1e-5)
+            bicgstab(A, self.rhs, self.du, tol = 1e-5)
         else: 
             A_csr = self.to_csr(self.triplets)
             if iter == 0: 
@@ -200,12 +312,16 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
                 newton = True
                 iter = 0
                 max_iter = 10
-                self.detect_collision()
+                # self.detect_collision()
                 while newton: 
-                    self.e_inertia.gradient(self.rhs, self.history, self.inertia)
-                    self.e_inertia.hessian(self.triplets, self.history, self.inertia)
+                    self.triplets.rows.zero_()
+                    self.triplets.cols.zero_()
+                    self.triplets.vals.zero_()
+                    self.rhs.zero_()
+                    wp.launch(inertia_grad_hess, self.n_bodies, inputs = [self.rhs, self.triplets, self.history, self.inertia, self.dt])
+                    # wp.launch(bsr_hessian_inertia, self.n_bodies, inputs = [self.triplets, self.history, self.inertia, self.dt])
                     
-                    dq_norm = self.compute_dq(iter) 
+                    dq_norm = self.compute_du(iter) 
                     alpha = self.line_search()
                     # alpha = self.line_search_batch()
                     iter += 1
@@ -226,11 +342,11 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
 
         return alpha
 
-    def compute_dq(self, iter): 
-        hess = bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, self.triplets.rows, self.triplets.cols, self.triplets.vals)
+    # def compute_dq(self, iter): 
+    #     hess = bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, self.triplets.rows, self.triplets.cols, self.triplets.vals)
         
-        cg(hess, self.rhs, self.du, tol = 1e-5)
-        return np.max(np.abs(self.du.numpy()))
+    #     bicgstab(hess, self.rhs, self.du, tol = 1e-5)
+    #     return np.max(np.abs(self.du.numpy()))
         
 
     def add_du(self, alpha):
