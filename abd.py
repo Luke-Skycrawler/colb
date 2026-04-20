@@ -161,6 +161,21 @@ def bsr2csr(triplets_BSR: Triplets, triplets_CSR: TripletsCSR):
 #         if mass[b1].m > z:
 #             wp.atomic_add(rhs, b1, db2)
 
+
+# @wp.struct
+# class BSR:
+#     stride: wp.array(dtype = int)
+#     offset: wp.array(dtype = int)
+#     blocks: wp.array(dtype = mat33)
+
+    
+# def bsr_empty(n = 1, nnz = 1):
+#     bsr = BSR()
+#     bsr.stride = wp.zeros(n, dtype = int)
+#     bsr.offset = wp.zeros(n, dtype = int)
+#     bsr.blocks = wp.zeros(nnz  * 16, dtype = mat33)
+#     return bsr
+
 @wp.kernel
 def forward_states(history: wp.array(dtype = BDFAffine), dt: scalar):
     i = wp.tid()
@@ -270,6 +285,49 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
                     
                 self.forward_states()
 
+    # def step(self):
+    #     inertia = self.e_inertia
+    #     states = AffineBodyStates()
+    #     states.states = self.history
+    #     g = self.rhs
+    #     bsr = bsr_empty(self.n_bodies)
+    #     wp.launch(_q_gets_q0, 1, inputs = [states])
+    #     it = 0 
+    #     # hess = bsr_zeros(4, 4, mat33)
+    #     rows = wp.zeros(16, dtype = int)
+    #     cols = wp.zeros(16, dtype = int)
+    #     values = wp.zeros(16, dtype = mat33)
+    #     dq = self.du
+    #     while True:
+    #         inertia.gradient(g, states.states)
+    #         inertia.hessian(bsr, states.states)
+
+
+    #         values.assign(bsr.blocks.flatten())
+    #         # print(bsr.blocks.numpy())
+
+    #         wp.launch(_set_triplets, 1, inputs = [rows, cols])
+    #         hess = bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, rows, cols, values)
+    #         # bsr_set_from_triplets(hess, rows, cols, values)
+    #         bicgstab(hess, g, dq, 1e-4)
+            
+
+    #         # print(bsr.blocks.numpy())
+    #         # print(hess.values.numpy())
+    #         # print(g.numpy())
+    #         print(f"dq norm = {np.linalg.norm(dq.numpy())}")
+
+    #         wp.launch(_update_q, 1, inputs = [states, dq])
+            
+    #         it += 1
+    #         if it > 1:
+    #             inertia.gradient(g, states.states)
+    #             # print("residue gradient: ", g.numpy())
+    #             break
+
+    #     wp.launch(_update_q0qdot, 1, inputs = [states])
+    #     self.frame += 1
+
     def line_search_iterative(self):
         alpha = 1.0
         backup = wp.clone(self.history)
@@ -328,5 +386,5 @@ def apply_du(du: vec3, dw: mat33, _state: BDFAffine, alpha: scalar, dt: scalar):
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFAffine), alpha: scalar, dt: scalar):
     i = wp.tid()
     dui = du[i]
-    dq = wp.matrix_from_cols(du[i * 4 + 1], du[i * 4 + 2], du[i * 4 + 3])
+    dq = wp.matrix_from_rows(du[i * 4 + 1], du[i * 4 + 2], du[i * 4 + 3])
     history[i] = apply_du(dui, dq, history[i], alpha, dt)

@@ -29,7 +29,7 @@ def compute_V(geo: Soup, history: wp.array(dtype = BDFAffine)):
     bd = geo.body[i]
     qi = history[bd].now.q
     ci = history[bd].now.c
-    R = qi
+    R = wp.transpose(qi)
     v0 = geo.xcs[i]
     v1 = (R @ v0) + ci
     geo.x_transformed[i] = v1
@@ -42,7 +42,8 @@ def init(history: wp.array(dtype = BDFAffine), p: wp.array(dtype = vec3), mass: 
     history[i].now.c = vec3(scalar(p[i].x), scalar(p[i].y), scalar(p[i].z))
     history[i].now.q = wp.identity(3, dtype = scalar)
     history[i].now.v = vec3(z, z, z)
-    history[i].now.qdot = mat33(z, o, z, -o, z, z, z, z, z)
+    # history[i].now.qdot = mat33(z, o, z, -o, z, z, z, z, z)
+    history[i].now.qdot = wp.skew(vec3(o, z, z))
 
     history[i].nxt = history[i].now
 
