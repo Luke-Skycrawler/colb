@@ -119,16 +119,16 @@ def inertia_grad_hess(g: wp.array(dtype = vec3), triplets: Triplets, states: wp.
                 triplets.rows[os + ii + jj * 4] = i * 4 + ii
                 triplets.cols[os + ii + jj * 4] = i * 4 + jj
                 triplets.vals[os + ii + jj * 4] = dh
-    # else: 
-    #     for ii in range(4):
-    #         for jj in range(4):
-    #             triplets.rows[os + ii + jj * 4] = i * 4 + ii
-    #             triplets.cols[os + ii + jj * 4] = i * 4 + jj
-    #             if ii == jj:
-    #                 triplets.vals[os + ii + jj * 4] = wp.identity(3, dtype = scalar) * scalar(100.0)
-    #             else:
-    #                 triplets.vals[os + ii + jj * 4] = mat33(scalar(0.0))
-    #         g[ii + i * 4] = vec3(scalar(0.0))
+    else: 
+        for ii in range(4):
+            for jj in range(4):
+                triplets.rows[os + ii + jj * 4] = i * 4 + ii
+                triplets.cols[os + ii + jj * 4] = i * 4 + jj
+                if ii == jj:
+                    triplets.vals[os + ii + jj * 4] = wp.identity(3, dtype = scalar) * scalar(100.0)
+                else:
+                    triplets.vals[os + ii + jj * 4] = mat33(scalar(0.0))
+            g[ii + i * 4] = vec3(scalar(0.0))
 @wp.func
 def Mdq(A: mat33, p: vec3, A_tilde: mat33, p_tilde: vec3, inertia: Inertia):
     q0 = p - p_tilde
@@ -379,6 +379,6 @@ def apply_du(du: vec3, dw: mat33, _state: BDFAffine, alpha: scalar, dt: scalar):
 @wp.kernel 
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFAffine), alpha: scalar, dt: scalar):
     i = wp.tid()
-    dui = du[i]
+    dui = du[i * 4]
     dq = wp.matrix_from_rows(du[i * 4 + 1], du[i * 4 + 2], du[i * 4 + 3])
     history[i] = apply_du(dui, dq, history[i], alpha, dt)
