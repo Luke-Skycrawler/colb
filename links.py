@@ -19,6 +19,7 @@ def free_float():
     # rbd = LineSearchGDRbd(dt, "assets/chains.json")
     # rbd = GaussNewtonRbd(dt, "assets/chains.json")
     rbd = NewtonAbd(dt, "assets/chains.json")
+    # rbd = NewtonAbd(dt, "assets/cube.json")
 
     viewer = PSViewer(rbd)
     ps.set_ground_plane_mode("none")

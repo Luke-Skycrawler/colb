@@ -12,6 +12,8 @@ import dxslv
 import numpy as np 
 from geometry import Soup
 from ortho import energy_ortho, grad_ortho, hessian_ortho
+from ipctk_wp.distance.edge_edge import x_to_grad_psd_hess_ee
+from barrier import barrier_derivative, barrier_derivative2
 @wp.struct
 class Triplets:
     rows: wp.array(dtype=int)
@@ -21,6 +23,8 @@ class Triplets:
 solver_config = "cg"
 stiffness = 4e4
 gravity = scalar(0.0)
+eps = 1e-6
+contact_stiffness = scalar(1e8)
 
 wp.config.max_unroll = 1
 wp.config.enable_backward = False
@@ -147,81 +151,156 @@ def tildeA(A0: mat33, Adot: mat33, dt: scalar) -> mat33:
 def tildep(p0: vec3, pdot: vec3, dt: scalar) -> vec3:
     return p0 + dt * pdot + dt * dt * vec3(scalar(0.0), gravity, scalar(0.0))
 
+@wp.func 
+def fetch_dist_v0v1(p: wp.array(dtype = BDFAffine), soup: Soup, c: XConstraint):
+    l0 = c.l0
+    i0 = c.a1a2b1b2[0]
+    i1 = c.a1a2b1b2[1]
+    i2 = c.a1a2b1b2[2]
+    i3 = c.a1a2b1b2[3]
+    
+    b0 = soup.body[i0]
+    b1 = soup.body[i2]
 
-# @wp.kernel
-# def compute_contact_gh_kernel(p: wp.array(dtype = BDFAffine), mass: wp.array(dtype = Inertia), soup: Soup, xconstraints: wp.array(dtype = XConstraint), triplets: Triplets, rhs: wp.array(dtype = vec12), dt: scalar):
-#     i = wp.tid()
-#     c = xconstraints[i]
-#     k = scalar(stiffness)
-#     n_bodies = p.shape[0]
+    R0 = p[b0].nxt.q
+    R1 = p[b1].nxt.q
 
-#     b0, b1 = fetch_b0b1(c, soup)
-#     dist, n, r1, r2 = fetch_dist_n_r0r1(p[b0], p[b1], soup, c)
-#     l0 = c.l0
+    c0 = p[b0].nxt.c
+    c1 = p[b1].nxt.c    
 
-#     v10 = n * dist
-#     z = scalar(0.0)
+    x0 = R0 @ soup.xcs[i0] + c0
+    x1 = R0 @ soup.xcs[i1] + c0
+    x2 = R1 @ soup.xcs[i2] + c1
+    x3 = R1 @ soup.xcs[i3] + c1
 
-#     if dist < l0:         
-#         a1 = wp.cross(r1, n)
-#         a2 = wp.cross(r2, n)
+    dab = wp.closest_point_edge_edge(wp.vec3(x0), wp.vec3(x1), wp.vec3(x2), wp.vec3(x3), eps)
+    v0 = wp.lerp(x0, x1, scalar(dab[0]))
+    v1 = wp.lerp(x2, x3, scalar(dab[1]))
 
+    dist = scalar(dab[2])
 
-#         j1 = make_vec6(n, a1)
-#         j2 = make_vec6(-n, -a2)
+    return dist, v0, v1
 
-#         dt2 = dt * dt
+@wp.kernel
+def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.array(dtype = XConstraint), triplets: Triplets, b: wp.array(dtype = vec3), inertia: wp.array(dtype = Inertia), dt: scalar):
+    i = wp.tid()
+    o = scalar(1.0)
+    z = scalar(0.0)
+    c = contacts[i]
+    
+    dist, v0, v1 = fetch_dist_v0v1(p, soup, c)
+    
+    if dist < c.l0:
+        i0 = c.a1a2b1b2[0]
+        i1 = c.a1a2b1b2[1]
+        i2 = c.a1a2b1b2[2]
+        i3 = c.a1a2b1b2[3]
+        b0 = soup.body[i0]
+        b1 = soup.body[i2]
 
-#         dj11 = k * wp.outer(j1, j1) * dt2
-#         dj22 = k * wp.outer(j2, j2) * dt2
-#         dj12 = k * wp.outer(j1, j2) * dt2
+        R0 = p[b0].nxt.q
+        R1 = p[b1].nxt.q
 
-#         # if mass[b0].m < z:
-#         #     dj11 *= z
-#         #     dj12 *= z
-#         # if mass[b1].m < z:
-#         #     dj22 *= z
-#         #     dj12 *= z
+        c0 = p[b0].nxt.c
+        c1 = p[b1].nxt.c    
 
-#         # wp.atomic_add(precond, b0 * 2, dpx12 * k)
-#         # wp.atomic_add(precond, b1 * 2, dpx12 * k)
-#         # wp.atomic_add(precond, b0 * 2 + 1, dpq1 * k)
-#         # wp.atomic_add(precond, b1 * 2 + 1, dpq2 * k)
+        x0 = R0 @ soup.xcs[i0] + c0
+        x1 = R0 @ soup.xcs[i1] + c0
+        x2 = R1 @ soup.xcs[i2] + c1
+        x3 = R1 @ soup.xcs[i3] + c1
 
-#         trip_offset = i * 4 + n_bodies
-#         # first n_bodies entries are for inertia
+        grad_dist, hess_dist = x_to_grad_psd_hess_ee(x0, x1, x2, x3)
+        B_ = barrier_derivative(dist * dist)
+        B__ = barrier_derivative2(dist * dist)
 
-#         if mass[b0].m > z:
-#             triplets.rows[trip_offset + 0] = b0 
-#             triplets.cols[trip_offset + 0] = b0
-#             triplets.vals[trip_offset + 0] = dj11
+        hess_dist = B_ * hess_dist + B__ * wp.outer(grad_dist, grad_dist)
+        grad_dist *= contact_stiffness * B_ * dt * dt
+        hess_dist *= contact_stiffness * dt * dt
+
         
-#         if mass[b1].m > z:
-#             triplets.rows[trip_offset + 1] = b1
-#             triplets.cols[trip_offset + 1] = b1
-#             triplets.vals[trip_offset + 1] = dj22
+        Jei = wp.matrix_from_rows(
+            vec4(o, x0.x, x0.y, x0.z),
+            vec4(o, x1.x, x1.y, x1.z),
+        )
+        Jej = wp.matrix_from_rows(
+            vec4(o, x2.x, x2.y, x2.z),
+            vec4(o, x3.x, x3.y, x3.z),
+        )
 
-#         if mass[b0].m > z and mass[b1].m > z:
-#             triplets.rows[trip_offset + 2] = b0
-#             triplets.cols[trip_offset + 2] = b1
-#             triplets.vals[trip_offset + 2] = dj12
+        g0 = vec3(grad_dist[0], grad_dist[1], grad_dist[2])
+        g1 = vec3(grad_dist[3], grad_dist[4], grad_dist[5])
+        g2 = vec3(grad_dist[6], grad_dist[7], grad_dist[8])
+        g3 = vec3(grad_dist[9], grad_dist[10], grad_dist[11])
 
-#             triplets.rows[trip_offset + 3] = b1
-#             triplets.cols[trip_offset + 3] = b0
-#             triplets.vals[trip_offset + 3] = wp.transpose(dj12)
+        h = wp.zeros((4, 4), dtype = mat33)
+        hess_ei = wp.zeros((4, 4), dtype = mat33)
+        hess_ej =  wp.zeros((4, 4), dtype = mat33)
+        hess_cross = wp.zeros((4, 4), dtype = mat33)
         
-#         f1 = k * (l0 - dist) * n * dt
-#         tau1 = wp.cross(r1, f1) 
-#         tau2 = wp.cross(r2, -f1)
-
-#         db1 = make_vec6(-f1, -tau1)
-#         db2 = make_vec6(f1, -tau2)
+        for ii in range(4):
+            for jj in range(4):
+                h[ii, jj] = mat33(
+                    hess_dist[ii * 3 + 0, jj * 3 + 0], hess_dist[ii * 3 + 0, jj * 3 + 1], hess_dist[ii * 3 + 0, jj * 3 + 2],
+                    hess_dist[ii * 3 + 1, jj * 3 + 0], hess_dist[ii * 3 + 1, jj * 3 + 1], hess_dist[ii * 3 + 1, jj * 3 + 2],
+                    hess_dist[ii * 3 + 2, jj * 3 + 0], hess_dist[ii * 3 + 2, jj * 3 + 1], hess_dist[ii * 3 + 2, jj * 3 + 2]
+                )
         
-#         if mass[b0].m > z:
-#             wp.atomic_add(rhs, b0, db1)
-#         if mass[b1].m > z:
-#             wp.atomic_add(rhs, b1, db2)
+        for ii in range(4):
+            for jj in range(4):
+                block_ei = mat33()
+                block_ej = mat33()
+                block_cross = mat33()
+                
+                for k in range(2):
+                    for l in range(2):
+                        block_ei += Jei[k, ii] * Jei[l, jj] * h[k, l]
+                        block_ej += Jej[k, ii] * Jej[l, jj] * h[k + 2, l + 2]
+                        block_cross += Jei[k, ii] * Jej[l, jj] * h[k, l + 2]
 
+                hess_ei[ii, jj] = block_ei
+                hess_ej[ii, jj] = block_ej
+                hess_cross[ii, jj] = block_cross
+                    
+                        
+                    
+        for ii in range(4):
+            gei = g0 * Jei[0, ii] + g1 * Jei[1, ii]
+            gej = g2 * Jej[0, ii] + g3 * Jej[1, ii]
+            if inertia[b0].m > z:
+                wp.atomic_add(b, b0 * 4 + ii, gei)
+            if inertia[b1].m > z:
+                wp.atomic_add(b, b1 * 4 + ii, gej)
+
+        for ii in range(4):
+            for jj in range(4):
+                m0 = inertia[b0].m
+                m1 = inertia[b1].m
+                if m0 > z:
+                    # hess ei
+                    iei = i * 64 + ii * 4 + jj
+                    triplets.rows[iei] = b0 * 4 + ii 
+                    triplets.cols[iei] = b0 * 4 + jj
+                    triplets.vals[iei] = hess_ei[ii, jj]
+
+                if m1 > z:
+                    # hess ej 
+                    iej = i * 64 + 16 + ii * 4 + jj
+                    triplets.rows[iej] = b1 * 4 + ii
+                    triplets.cols[iej] = b1 * 4 + jj
+                    triplets.vals[iej] = hess_ej[ii, jj]
+
+                if m0 > z and m1 > z:
+                    # cross terms 
+                    ic1 = i * 64 + 32 + ii * 4 + jj
+                    ic2 = i * 64 + 48 + ii * 4 + jj
+                    
+                    triplets.rows[ic1] = b0 * 4 + ii
+                    triplets.cols[ic1] = b1 * 4 + jj
+                    triplets.vals[ic1] = hess_cross[ii, jj]
+
+                    triplets.rows[ic2] = b1 * 4 + ii
+                    triplets.cols[ic2] = b0 * 4 + jj
+                    triplets.vals[ic2] = wp.transpose(hess_cross[jj, ii])
 
 @wp.kernel
 def forward_states(history: wp.array(dtype = BDFAffine), dt: scalar):
@@ -312,14 +391,15 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
                 newton = True
                 iter = 0
                 max_iter = 10
-                # self.detect_collision()
+                self.detect_collision()
                 while newton: 
                     self.triplets.rows.zero_()
                     self.triplets.cols.zero_()
                     self.triplets.vals.zero_()
                     self.rhs.zero_()
                     wp.launch(inertia_grad_hess, self.n_bodies, inputs = [self.rhs, self.triplets, self.history, self.inertia, self.dt])
-                    # wp.launch(bsr_hessian_inertia, self.n_bodies, inputs = [self.triplets, self.history, self.inertia, self.dt])
+
+                    wp.launch(contact_hessian_ee, dim = (self.n_contacts, ), inputs = [self.history, self.soup, self.contacts_new.list, self.triplets, self.rhs, self.inertia, self.dt])
                     
                     dq_norm = self.compute_du(iter) 
                     alpha = self.line_search()
