@@ -19,7 +19,13 @@ d2hat = scalar(dhat * dhat)
 #         ret = -(scalar(2.0) * wp.log(d / d2hat) + (d - d2hat) / d + (d - d2hat) * (scalar(2.0) / d + d2hat / (d * d))) / (d2hat * d2hat)
 #     return ret
 
-
+@wp.func 
+def barrier_energy(d: scalar) -> scalar:
+    ret = scalar(0.0)
+    if d < d2hat: 
+        ret = (d - d2hat) * (d - d2hat)
+    return ret
+    
 @wp.func
 def barrier_derivative(d: scalar) -> scalar:
     ret = scalar(0.0)

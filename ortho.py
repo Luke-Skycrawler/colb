@@ -2,7 +2,7 @@ from scalar_types import *
 wp.config.max_unroll = 1
 wp.config.enable_backward = False
 
-stiffness = scalar(1e9)
+stiffness = scalar(1e5)
 
 
 

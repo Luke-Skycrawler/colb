@@ -97,7 +97,7 @@ class LineSearchInterface:
     def line_search_iterative(self):
         alpha = 1.0
         backup = wp.clone(self.history)
-        E0 = self.compute_g()
+        E0 = self.compute_g(False)
 
         while True:
             wp.copy(self.history, backup)    
@@ -129,7 +129,7 @@ class LineSearchInterface:
         return self.line_search_iterative()
         # return self.line_search_batch()
 
-    def compute_g(self):
+    def compute_g(self, update_contact = True):
         '''
         Eq. (2) in [2]
         g(u) = 1/2 (u - u_tilde)^T M (u - u_tilde) + sum_j 1/2 k Cj(q)^2

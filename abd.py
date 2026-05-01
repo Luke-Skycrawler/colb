@@ -13,17 +13,17 @@ import numpy as np
 from geometry import Soup
 from ortho import energy_ortho, grad_ortho, hessian_ortho
 from ipctk_wp.distance.edge_edge import x_to_grad_psd_hess_ee
-from barrier import barrier_derivative, barrier_derivative2
+from barrier import barrier_energy, barrier_derivative, barrier_derivative2
 @wp.struct
 class Triplets:
     rows: wp.array(dtype=int)
     cols: wp.array(dtype=int)
     vals: wp.array(dtype=mat33)
 
-solver_config = "direct"
+solver_config = "cg"
 gravity = scalar(-10.0)
 eps = 1e-6
-contact_stiffness = scalar(4e6)
+contact_stiffness = scalar(4e7)
 
 wp.config.max_unroll = 1
 wp.config.enable_backward = False
@@ -58,6 +58,16 @@ def energy_inertia(states: wp.array(dtype = BDFAffine), e: wp.array(dtype = scal
     dqTMdq = norm_M(inertia[i], state.nxt.q, state.nxt.c, A_tilde, p_tilde)
     de = energy_ortho(state.nxt.q) * dt * dt + scalar(0.5) * dqTMdq
     wp.atomic_add(e, 0, de)
+
+@wp.kernel
+def energy_contact(states: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.array(dtype = XConstraint), e: wp.array(dtype = scalar), dt: scalar):
+    i = wp.tid()
+    c = contacts[i]
+    
+    dist, v0, v1 = fetch_dist_v0v1(states, soup, c)
+    if dist < c.l0:
+        de = barrier_energy(dist * dist) * dt * dt * contact_stiffness
+        wp.atomic_add(e, 0, de)
 
 @wp.func
 def norm_M(inertia: Inertia, A: mat33, p: vec3, A_tilde: mat33, p_tilde: vec3) -> scalar:
@@ -395,7 +405,7 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
             with wp.ScopedTimer("newton step"):
                 newton = True
                 iter = 0
-                max_iter = 10
+                max_iter = 16
                 while newton: 
                     self.detect_collision()
                     self.triplets.rows.zero_()
@@ -415,17 +425,29 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
                     
                 self.forward_states()
 
-    def line_search_iterative(self):
-        alpha = 1.0
-        backup = wp.clone(self.history)
-        # E0 = self.compute_g()
+    # def line_search_iterative(self):
+    #     alpha = 1.0
+    #     backup = wp.clone(self.history)
+    #     # E0 = self.compute_g()
 
-        while True:
-            wp.copy(self.history, backup)    
-            self.add_du(alpha)
-            break
+    #     while True:
+    #         wp.copy(self.history, backup)    
+    #         self.add_du(alpha)
+    #         break
 
-        return alpha
+    #     return alpha
+
+    def compute_g(self, update_contact = True):
+        '''
+        g = h ^ 2 * (E_ortho + B) + 1/2 |q - \tilde{q}|_M^2
+        '''
+        self.g.zero_()
+        wp.launch(energy_inertia, (self.n_bodies,), inputs = [self.history, self.g, self.inertia, self.dt])
+        if update_contact:
+            self.detect_collision()
+        wp.launch(energy_contact, (self.n_contacts,), inputs = [self.history, self.soup, self.contacts_new.list, self.g, self.dt])
+
+        return self.g.numpy()[0]
 
     # def compute_dq(self, iter): 
     #     hess = bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, self.triplets.rows, self.triplets.cols, self.triplets.vals)
