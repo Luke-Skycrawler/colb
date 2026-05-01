@@ -3,7 +3,7 @@ import numpy as np
 from quat_util import vec3, vec4, mat33, mat44, scalar, Rq
 from geometry import Soup
 from BDF1 import BDFHistory
-
+from warp.sparse import bsr_from_triplets
 thickness = 0.0475
 contact_volume = 10000
 buffer = thickness
@@ -14,6 +14,13 @@ TODO: make sure max_unroll = 0 before importing this module
 
 (see `fix_interference` kernel)
 '''
+
+@wp.struct 
+class CSRTriplets:
+    rows: wp.array(dtype = int)
+    cols: wp.array(dtype = int)
+    vals: wp.array(dtype = int)
+
 
 @wp.kernel 
 def edge_aabb(x: wp.array(dtype = vec3), edges: wp.array(dtype = int), aabb_lower: wp.array(dtype = wp.vec3), aabb_upper: wp.array(dtype = wp.vec3), thickness: scalar):
@@ -179,6 +186,20 @@ def color_contacts(contacts: Contacts, color: wp.array(dtype = int), dirty: wp.a
     if i < contacts.cnt[0]:
         fix_interference(contacts.list[i].a1a2b1b2, color, dirty)
 
+
+@wp.kernel 
+def to_adjacency_csr(constraints: wp.array(dtype = XConstraint), triplets: CSRTriplets, soup: Soup):
+    i = wp.tid()
+    c = constraints[i]
+    b0, b1 = fetch_b0b1(c, soup)
+    
+    if b0 != b1: 
+        triplets.rows[i * 2 + 0] = b0
+        triplets.cols[i * 2 + 0] = b1
+
+        triplets.rows[i * 2 + 1] = b1
+        triplets.cols[i * 2 + 1] = b0
+
 class ContactSolverBase:
     def __init__(self):
         '''
@@ -267,3 +288,14 @@ class ContactSolverBase:
         valid = dists < thickness * 2.0
         magnitudes = np.abs(dists[valid] - thickness * 2.0)
         return points[valid], magnitudes
+
+    def bodywise_connectivity(self):
+        triplets = CSRTriplets()
+        triplets.rows = wp.zeros((self.n_contacts * 2,), dtype = int)
+        triplets.cols = wp.zeros((self.n_contacts * 2,), dtype = int)
+        triplets.vals = wp.ones((self.n_contacts * 2,), dtype = int)
+
+        wp.launch(to_adjacency_csr, dim = (self.n_contacts,), inputs = [self.contacts_new.list, triplets, self.soup])
+        adjacency = bsr_from_triplets(self.n_bodies, self.n_bodies, triplets.rows, triplets.cols, triplets.vals)
+        
+        return adjacency

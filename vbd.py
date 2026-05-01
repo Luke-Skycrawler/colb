@@ -2,11 +2,8 @@ import warp as wp
 import numpy as np 
 from primal import PrimalRbd, XConstraint, stiffness, eps, gravity, compute_u_minus_utilde
 from quat_util import scalar, vec3, vec4, mat33, mat44, Rq, Gq, Hq, RigidState, quat_mult
-from xpbd_contact import fetch_b0b1,  fetch_dist_n_r0r1
 from BDF1 import BDFHistory
-from rbd_simple import Inertia
-from geometry import Soup
-from warp.sparse import bsr_from_triplets
+
 @wp.kernel
 def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFHistory), alpha: scalar, dt: scalar, color: int, colors: wp.array(dtype = int)):
     i = wp.tid()
@@ -47,24 +44,7 @@ def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFHisto
 #         else:
 #             idx_test += 1
 
-@wp.struct 
-class CSRTriplets:
-    rows: wp.array(dtype = int)
-    cols: wp.array(dtype = int)
-    vals: wp.array(dtype = int)
 
-@wp.kernel 
-def to_adjacency_csr(constraints: wp.array(dtype = XConstraint), triplets: CSRTriplets, soup: Soup):
-    i = wp.tid()
-    c = constraints[i]
-    b0, b1 = fetch_b0b1(c, soup)
-    
-    if b0 != b1: 
-        triplets.rows[i * 2 + 0] = b0
-        triplets.cols[i * 2 + 0] = b1
-
-        triplets.rows[i * 2 + 1] = b1
-        triplets.cols[i * 2 + 1] = b0
 
 @wp.kernel
 def verify_coloring(offsets: wp.array(dtype = int), indices: wp.array(dtype = int), colors: wp.array(dtype = int), cnt_invalid: wp.array(dtype = int)):
@@ -116,16 +96,6 @@ class VBDRbd(PrimalRbd):
         vnp = np.random.permutation(self.n_bodies)
         self.node_values = wp.array(vnp, dtype = int)
     
-    def bodywise_connectivity(self):
-        triplets = CSRTriplets()
-        triplets.rows = wp.zeros((self.n_contacts * 2,), dtype = int)
-        triplets.cols = wp.zeros((self.n_contacts * 2,), dtype = int)
-        triplets.vals = wp.ones((self.n_contacts * 2,), dtype = int)
-
-        wp.launch(to_adjacency_csr, dim = (self.n_contacts,), inputs = [self.contacts_new.list, triplets, self.soup])
-        adjacency = bsr_from_triplets(self.n_bodies, self.n_bodies, triplets.rows, triplets.cols, triplets.vals)
-        
-        return adjacency
 
     def colorization(self):
         adj = self.bodywise_connectivity()
