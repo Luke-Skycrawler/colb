@@ -43,6 +43,8 @@ class AffineState:
     q: mat33
     v: vec3 
     qdot: mat33
+    # q is the transpose of A 
+    # take the rows of q as the DoFs, in correspondence to the paper notation 
 
 @wp.func
 def dGdqx(): 

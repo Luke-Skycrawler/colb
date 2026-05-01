@@ -20,7 +20,7 @@ class Triplets:
     cols: wp.array(dtype=int)
     vals: wp.array(dtype=mat33)
 
-solver_config = "cg"
+solver_config = "direct"
 gravity = scalar(-10.0)
 eps = 1e-6
 contact_stiffness = scalar(4e6)
@@ -343,15 +343,15 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
 
     def to_csr(self, triplets: Triplets): 
         a = TripletsCSR() 
-        nnz = (self.n_bodies) * 9
+        nnz = (self.n_bodies + self.n_contacts * 4) * 144
         a.rows = wp.zeros((nnz,), dtype = int)
         a.cols = wp.zeros_like(a.rows)
         a.vals = wp.zeros((nnz,), dtype = scalar)
 
-        wp.launch(bsr2csr, dim = nnz // 9, inputs = [triplets, a])
+        wp.launch(bsr2csr, dim = (nnz // 9,), inputs = [triplets, a])
 
         # prune numerical zeros off is necessary, because the direct solver will directly copy the first nnz values
-        return bsr_from_triplets(self.n_bodies * 4, self.n_bodies * 4, a.rows, a.cols, a.vals, prune_numerical_zeros=False)
+        return bsr_from_triplets(self.n_bodies * 12, self.n_bodies * 12, a.rows, a.cols, a.vals, prune_numerical_zeros=False)
 
     def to_scipy_csr(self, mat):
         ii = mat.offsets.numpy()
@@ -370,7 +370,8 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
             bicgstab(A, self.rhs, self.du, tol = 1e-5)
         else: 
             A_csr = self.to_csr(self.triplets)
-            if iter == 0: 
+            # if iter == 0: 
+            if True:
                 with wp.ScopedTimer("build solver"):
                     A_scipy = self.to_scipy_csr(A_csr)
                     self.solver = dxslv.CUSolver(A_scipy)
