@@ -10,6 +10,11 @@ from geometry import Soup
 from warp.optim.linear import cg
 from warp.sparse import bsr_from_triplets, bsr_set_from_triplets
 from utils.data_collector import Profiller
+import dxslv
+from scipy.sparse import csr_matrix, bsr_matrix
+
+solver_config = "direct"
+assert solver_config in ["cg", "direct"]
 
 @wp.struct 
 class Triplets:
@@ -93,7 +98,7 @@ class LineSearchInterface:
     def line_search_iterative(self):
         alpha = 1.0
         backup = wp.clone(self.history)
-        E0 = self.compute_g()
+        E0 = self.compute_g(False)
 
         while True:
             wp.copy(self.history, backup)    
@@ -125,7 +130,7 @@ class LineSearchInterface:
         return self.line_search_iterative()
         # return self.line_search_batch()
 
-    def compute_g(self):
+    def compute_g(self, update_contact = True):
         '''
         Eq. (2) in [2]
         g(u) = 1/2 (u - u_tilde)^T M (u - u_tilde) + sum_j 1/2 k Cj(q)^2
@@ -223,6 +228,12 @@ def compute_contact_gh_kernel(p: wp.array(dtype = BDFHistory), mass: wp.array(dt
         # wp.atomic_add(rhs, b0 * 2 + 1, -tau1)
         # wp.atomic_add(rhs, b1 * 2 + 1, -tau2)
 
+    else:
+        triplets.rows[i * 4 + 0 + n_bodies] = b0
+        triplets.cols[i * 4 + 0 + n_bodies] = b1
+
+        triplets.rows[i * 4 + 1 + n_bodies] = b1
+        triplets.cols[i * 4 + 1 + n_bodies] = b0
 @wp.func 
 def make_vec6(v: vec3, w: vec3) -> vec6:
     return vec6(v[0], v[1], v[2], w[0], w[1], w[2]) 
@@ -256,6 +267,28 @@ def add_vec6_du_kernel(du: wp.array(dtype = vec6), history: wp.array(dtype = BDF
     omega = vec3(dui[3], dui[4], dui[5])
     history[i] = apply_du(u, omega, history[i], alpha, dt)
 
+def ptr(arr):
+    return arr.__cuda_array_interface__['data'][0]
+
+@wp.struct 
+class TripletsCSR:
+    rows: wp.array(dtype = int)
+    cols: wp.array(dtype = int)
+    vals: wp.array(dtype = scalar)    
+
+@wp.kernel
+def bsr2csr(triplets_BSR: Triplets, triplets_CSR: TripletsCSR):
+    i = wp.tid() 
+
+    r = triplets_BSR.rows[i] * 6
+    c = triplets_BSR.cols[i] * 6
+    v = triplets_BSR.vals[i]
+
+    for ii in range(6):
+        for jj in range(6):
+            triplets_CSR.rows[i * 36 + ii * 6 + jj] = r + ii
+            triplets_CSR.cols[i * 36 + ii * 6 + jj] = c + jj
+            triplets_CSR.vals[i * 36 + ii * 6 + jj] = v[ii][jj]
 
 class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
     def __init__(self, h, config_file):
@@ -287,11 +320,56 @@ class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
         # inertia hessian and gradient
         wp.launch(compute_inertia_gh_kernel, (self.n_bodies,), inputs = [self.history, self.inertia, self.triplets, self.rhs, self.dt])
         
+    def to_scipy_bsr(self, mat):
+        ii = mat.offsets.numpy()
+        jj = mat.columns.numpy()
+        values = mat.values.numpy()
+        shape = (mat.nrow * 6, mat.ncol * 6) 
+        print(f"shape = {shape}, values = {values.shape}, ii = {ii.shape}, jj = {jj.shape}")
+        bsr = bsr_matrix((values, jj, ii), shape = mat.shape, blocksize = (6 , 6))
+        # return bsr.toarray()
+        return bsr
 
-    def compute_du(self):
+    def to_scipy_csr(self, mat):
+        ii = mat.offsets.numpy()
+        jj = mat.columns.numpy()
+        values = mat.values.numpy()
+        shape = (mat.nrow, mat.ncol) 
+        print(f"shape = {shape}, values = {values.shape}, ii = {ii.shape}, jj = {jj.shape}")
+        csr = csr_matrix((values, jj, ii), shape = shape)
+        return csr
+
+    def to_csr(self, triplets: Triplets): 
+        a = TripletsCSR() 
+        nnz = (self.n_bodies + self.n_contacts * 4) * 36
+        a.rows = wp.zeros((nnz,), dtype = int)
+        a.cols = wp.zeros_like(a.rows)
+        a.vals = wp.zeros((nnz,), dtype = scalar)
+
+        wp.launch(bsr2csr, dim = (nnz // 36,), inputs = [triplets, a])
+
+        # prune numerical zeros off is necessary, because the direct solver will directly copy the first nnz values
+        return bsr_from_triplets(self.n_bodies * 6, self.n_bodies * 6, a.rows, a.cols, a.vals, prune_numerical_zeros=False)
+        
+
+    def compute_du(self, iter):
         self.du.zero_()
-        A = bsr_from_triplets(self.n_bodies, self.n_bodies, self.triplets.rows, self.triplets.cols, self.triplets.vals)
-        cg(A, self.rhs, self.du, tol = 1e-5)
+        if solver_config == "cg": 
+            A = bsr_from_triplets(self.n_bodies, self.n_bodies, self.triplets.rows, self.triplets.cols, self.triplets.vals)
+            cg(A, self.rhs, self.du, tol = 1e-5)
+        else: 
+            A_csr = self.to_csr(self.triplets)
+            if iter == 0: 
+                with wp.ScopedTimer("build solver"):
+                    A_scipy = self.to_scipy_csr(A_csr)
+                    self.solver = dxslv.CUSolver(A_scipy)
+                with wp.ScopedTimer("analyze + factorize"):
+                    self.solver.analyze_pattern()
+                    self.solver.factorize()
+            else:
+                values = A_csr.values
+                self.solver.refactor_cuda(ptr(values))
+            self.solver.solve_cuda(ptr(self.rhs), ptr(self.du))
         du_norm = np.max(np.abs(self.du.numpy()))
         return du_norm
 
@@ -320,7 +398,7 @@ class GaussNewtonRbd(LineSearchInterface, RbdComplex, ContactSolverBase):
                     self.compute_contact_gh()
                     self.compute_inertia_gh()
                     
-                    du_norm = self.compute_du() 
+                    du_norm = self.compute_du(iter) 
                     alpha = self.line_search()
                     # alpha = self.line_search_batch()
                     iter += 1

@@ -9,6 +9,7 @@ Implemented algorithms:
 - [ ] gauss-newton implicit
 - [ ] analytically projected newton ^[3]
 - [x] preconditioned gradient descent (primal solver in ^[4])  
+- [x] abd ^[6]
 
 #### Prerequisites 
 
@@ -42,6 +43,8 @@ Tested on RTX 3080. Python 3.10.14. YLS takes 5ms to simulate 1ms.
 | preconditioned gradient descent   | ~2ms    | 8ms       | 16          | true |
 |PGD (w/ line search)               | ~5ms     | 8ms       | 16          | true |
 |vbd                                | ~5ms     | 4ms        | 2         | true |
+|abd                                | ~2000 ms | 32ms       | 16         | -    |
+
 #### Reference
 
 [1]: Detailed Rigid Body Simulation with Extended Position Based Dynamics
@@ -49,3 +52,4 @@ Tested on RTX 3080. Python 3.10.14. YLS takes 5ms to simulate 1ms.
 [3]: A Unified Analysis of Penalty-Based Collision Energies
 [4]: Primal/Dual Descent Methods for Dynamics
 [5]: Vertex Block Descent
+[6]: Affine Body Dynamics: Fast, Stable and Intersection-free Simulation of Stiff Materials

@@ -206,7 +206,7 @@ class PrimalRbd(RbdComplex, ContactSolverBase):
         '''
         self.precond.zero_()
         self.rhs.zero_()
-        wp.launch(preconditioner_diag_kernel, dim = (self.n_contacts, ), inputs = [self.history, self.inertia, self.soup, self.contacts_new.list, self.precond, self.rhs, self.dt])
+        # wp.launch(preconditioner_diag_kernel, dim = (self.n_contacts, ), inputs = [self.history, self.inertia, self.soup, self.contacts_new.list, self.precond, self.rhs, self.dt])
         
     def compute_rhs(self):
         wp.launch(rhs_kernel, dim = (self.n_bodies, ), inputs = [self.history, self.inertia, self.precond, self.rhs, self.dt])

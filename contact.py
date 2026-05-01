@@ -5,7 +5,7 @@ from geometry import Soup
 from BDF1 import BDFHistory
 
 thickness = 0.0475
-contact_volume = 900000
+contact_volume = 10000
 buffer = thickness
 eps = 1e-6
 
