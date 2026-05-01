@@ -21,10 +21,9 @@ class Triplets:
     vals: wp.array(dtype=mat33)
 
 solver_config = "cg"
-stiffness = 4e4
-gravity = scalar(0.0)
+gravity = scalar(-10.0)
 eps = 1e-6
-contact_stiffness = scalar(1e8)
+contact_stiffness = scalar(4e6)
 
 wp.config.max_unroll = 1
 wp.config.enable_backward = False
@@ -162,8 +161,8 @@ def fetch_dist_v0v1(p: wp.array(dtype = BDFAffine), soup: Soup, c: XConstraint):
     b0 = soup.body[i0]
     b1 = soup.body[i2]
 
-    R0 = p[b0].nxt.q
-    R1 = p[b1].nxt.q
+    R0 = wp.transpose(p[b0].nxt.q)
+    R1 = wp.transpose(p[b1].nxt.q)
 
     c0 = p[b0].nxt.c
     c1 = p[b1].nxt.c    
@@ -198,8 +197,8 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
         b0 = soup.body[i0]
         b1 = soup.body[i2]
 
-        R0 = p[b0].nxt.q
-        R1 = p[b1].nxt.q
+        R0 = wp.transpose(p[b0].nxt.q)
+        R1 = wp.transpose(p[b1].nxt.q)
 
         c0 = p[b0].nxt.c
         c1 = p[b1].nxt.c    
@@ -396,8 +395,8 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
                 newton = True
                 iter = 0
                 max_iter = 10
-                self.detect_collision()
                 while newton: 
+                    self.detect_collision()
                     self.triplets.rows.zero_()
                     self.triplets.cols.zero_()
                     self.triplets.vals.zero_()

@@ -27,8 +27,8 @@ class AffineBodyBase:
 def compute_V(geo: Soup, history: wp.array(dtype = BDFAffine)):
     i = wp.tid()
     bd = geo.body[i]
-    qi = history[bd].now.q
-    ci = history[bd].now.c
+    qi = history[bd].nxt.q
+    ci = history[bd].nxt.c
     R = wp.transpose(qi)
     v0 = geo.xcs[i]
     v1 = (R @ v0) + ci
