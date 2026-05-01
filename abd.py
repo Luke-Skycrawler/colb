@@ -2,7 +2,7 @@ import warp as wp
 from rbd_simple import Inertia
 from scalar_types import *
 from abd_simple import AbdComplex
-from contact import ContactSolverBase, contact_volume, XConstraint, fetch_b0b1
+from contact import ContactSolverBase, contact_volume, XConstraint, fetch_b0b1, thickness, ContactRet
 from gauss_newton import LineSearchInterface, TripletsCSR
 from scipy.sparse import csr_matrix
 from warp.sparse import bsr_from_triplets
@@ -209,6 +209,11 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
         x2 = R1 @ soup.xcs[i2] + c1
         x3 = R1 @ soup.xcs[i3] + c1
 
+        x0_tilde = soup.xcs[i0]
+        x1_tilde = soup.xcs[i1]
+        x2_tilde = soup.xcs[i2]
+        x3_tilde = soup.xcs[i3]
+
         grad_dist, hess_dist = x_to_grad_psd_hess_ee(x0, x1, x2, x3)
         B_ = barrier_derivative(dist * dist)
         B__ = barrier_derivative2(dist * dist)
@@ -219,12 +224,12 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
 
         
         Jei = wp.matrix_from_rows(
-            vec4(o, x0.x, x0.y, x0.z),
-            vec4(o, x1.x, x1.y, x1.z),
+            vec4(o, x0_tilde.x, x0_tilde.y, x0_tilde.z),
+            vec4(o, x1_tilde.x, x1_tilde.y, x1_tilde.z),
         )
         Jej = wp.matrix_from_rows(
-            vec4(o, x2.x, x2.y, x2.z),
-            vec4(o, x3.x, x3.y, x3.z),
+            vec4(o, x2_tilde.x, x2_tilde.y, x2_tilde.z),
+            vec4(o, x3_tilde.x, x3_tilde.y, x3_tilde.z),
         )
 
         g0 = vec3(grad_dist[0], grad_dist[1], grad_dist[2])
@@ -434,15 +439,23 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         wp.launch(add_du_kernel, dim = (self.n_bodies,), inputs = [self.du, self.history, alpha, self.dt])
 
     def get_contact_points(self):
-        # wp.launch(get_contact_points, (self.n_contacts,), inputs = [self.history, self.soup, self.contacts_new.list, self.contact_ret])
-        # # filter d > 2 * thickness
-        # dists = self.contact_ret.dists.numpy()[:self.n_contacts]
-        # points = self.contact_ret.points.numpy()[:self.n_contacts]
+        wp.launch(get_contact_points, (self.n_contacts,), inputs = [self.history, self.soup, self.contacts_new.list, self.contact_ret])
+        # filter d > 2 * thickness
+        dists = self.contact_ret.dists.numpy()[:self.n_contacts]
+        points = self.contact_ret.points.numpy()[:self.n_contacts]
         
-        # valid = dists < thickness * 2.0
-        # magnitudes = np.abs(dists[valid] - thickness * 2.0)
-        return np.zeros((0, 3)), np.zeros((0,))
+        valid = dists < thickness * 2.0
+        magnitudes = np.abs(dists[valid] - thickness * 2.0)
+        # return np.zeros((0, 3)), np.zeros((0,))
         return points[valid], magnitudes
+
+@wp.kernel
+def get_contact_points(p: wp.array(dtype = BDFAffine), soup: Soup, xconstraints: wp.array(dtype = XConstraint), contact_ret: ContactRet):
+    i = wp.tid()
+    c = xconstraints[i]
+    dist, v0, v1 = fetch_dist_v0v1(p, soup, c)
+    contact_ret.points[i] = (v0 + v1) * scalar(0.5)
+    contact_ret.dists[i] = dist
 
 @wp.func
 def apply_du(du: vec3, dw: mat33, _state: BDFAffine, alpha: scalar, dt: scalar): 
