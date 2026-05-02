@@ -2,10 +2,10 @@ import warp as wp
 from rbd_simple import Inertia
 from scalar_types import *
 from abd_simple import AbdComplex
-from contact import ContactSolverBase, contact_volume, XConstraint, fetch_b0b1, thickness, ContactRet
+from contact import ContactSolverBase, contact_volume, XConstraint, fetch_b0b1, thickness, ContactRet, CSRTriplets
 from gauss_newton import LineSearchInterface, TripletsCSR
 from scipy.sparse import csr_matrix
-from warp.sparse import bsr_from_triplets
+from warp.sparse import bsr_from_triplets, bsr_axpy
 from warp.optim.linear import cg, bicgstab
 from BDF1 import BDFAffine, AffineState
 import dxslv
@@ -341,6 +341,7 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         self.rhs = wp.zeros((self.n_bodies * 4,), dtype = vec3)
         self.du = wp.zeros_like(self.rhs)
         self.triplets = triplets
+        self.pattern_old = None 
 
     def compute_contact_gh(self):
         return 
@@ -381,7 +382,10 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         else: 
             A_csr = self.to_csr(self.triplets)
             # if iter == 0: 
-            if True:
+            new_pattern = self.bodywise_actual_contact()
+            cond = self.pattern_old is None or self.pattern_diff(new_pattern, self.pattern_old)
+            self.pattern_old = new_pattern
+            if cond:
                 with wp.ScopedTimer("build solver"):
                     A_scipy = self.to_scipy_csr(A_csr)
                     self.solver = dxslv.CUSolver(A_scipy)
@@ -395,6 +399,15 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         du_norm = np.max(np.abs(self.du.numpy()))
         return du_norm
 
+    def pattern_diff(self, a, b):
+        a_columns = a.columns.numpy()
+        b_columns = b.columns.numpy()
+        a_offsets = a.offsets.numpy()
+        b_offsets = b.offsets.numpy()
+
+        # if a_columns.shape[0] == b_columns.shape[0] and np.max(np.abs(a_columns - b_columns)) == 0 and np.max(np.abs(a_offsets - b_offsets)) == 0:
+        #     return False
+        return True
 
     def forward_states(self): 
         wp.launch(forward_states, self.n_bodies, inputs = [self.history, self.dt])
@@ -424,6 +437,15 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
                     newton = not (dq_norm < 1e-5 or iter >= max_iter)
                     
                 self.forward_states()
+
+    def bodywise_actual_contact(self):
+        triplets = CSRTriplets()
+        triplets.rows = wp.zeros((self.n_contacts * 2,), dtype = int)
+        triplets.cols = wp.zeros((self.n_contacts * 2,), dtype = int)
+        triplets.vals = wp.ones((self.n_contacts * 2,), dtype = int)
+        wp.launch(bodywise_actual_contact, dim = (self.n_contacts, ), inputs = [self.history, self.contacts_new.list, triplets, self.soup])
+        adjacency = bsr_from_triplets(self.n_bodies, self.n_bodies, triplets.rows, triplets.cols, triplets.vals)
+        return adjacency
 
     # def line_search_iterative(self):
     #     alpha = 1.0
@@ -497,3 +519,16 @@ def add_du_kernel(du: wp.array(dtype = vec3), history: wp.array(dtype = BDFAffin
     dui = du[i * 4]
     dq = wp.matrix_from_rows(du[i * 4 + 1], du[i * 4 + 2], du[i * 4 + 3])
     history[i] = apply_du(dui, dq, history[i], alpha, dt)
+
+@wp.kernel
+def bodywise_actual_contact(history: wp.array(dtype = BDFAffine), contacts: wp.array(dtype = XConstraint), triplets: CSRTriplets, soup: Soup):
+    i = wp.tid()
+    c = contacts[i]
+    b0, b1 = fetch_b0b1(c, soup)
+    dist, v0, v1 = fetch_dist_v0v1(history, soup, c)
+    if b0 != b1 and dist < c.l0: 
+        triplets.rows[i * 2 + 0] = b0
+        triplets.cols[i * 2 + 0] = b1
+        triplets.rows[i * 2 + 1] = b1
+        triplets.cols[i * 2 + 1] = b0
+
