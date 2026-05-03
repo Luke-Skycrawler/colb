@@ -39,11 +39,14 @@ Tested on RTX 3080. Python 3.10.14. YLS takes 5ms to simulate 1ms.
 
 | method                            | real time  | sim time | iterations | early termination | 
 |---|---|---|---|---|
-| xpbd                              |~ 1ms    | 2ms       | 2          | true |
-| preconditioned gradient descent   | ~2ms    | 8ms       | 16          | true |
-|PGD (w/ line search)               | ~5ms     | 8ms       | 16          | true |
-|vbd                                | ~5ms     | 4ms        | 2         | true |
-|abd                                | ~2000 ms | 32ms       | 16         | -    |
+| xpbd                              |~ 1ms      | 2ms       | 2          | true |
+| preconditioned gradient descent   | ~2ms      | 8ms       | 16          | true |
+|PGD (w/ line search)               | ~5ms      | 8ms       | 16          | true |
+|vbd                                | ~5ms      | 4ms       | 2         | true |
+|abd (cubic barrier, largest $\Delta t$)  | ~400 ms   | 32ms      | 16         | true    |
+|abd converged (cubic barrier)                      | ~80 ms    | 8ms       | 16         | 1e-5 tolerance |       
+
+To compare between cubic barrier and quadratic barrier, switch in the `barrier.py`. `plot.ipynb` contains a profiler that tracks the convergence for abd. 
 
 #### Reference
 

@@ -11,10 +11,10 @@ class PSViewer:
         self.ps_medial.set_radius(0.0475, relative=False)
         self.frame = 0
         self.rbd = rbd
-        self.ui_pause = True
+        self.ui_pause = False
         self.animate = False
         self.ui_reload_from = 0
-        self.end_frame = 4000
+        self.end_frame = 49
         self.capture_interval = 1
      
     def save(self):
@@ -61,3 +61,4 @@ class PSViewer:
             print(f"end frame = {self.frame} reached, exiting")
             
             self.rbd.profiler.save(f"output/profiler.npz")
+            quit()

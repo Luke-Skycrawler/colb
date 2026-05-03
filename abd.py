@@ -16,6 +16,7 @@ from ipctk_wp.distance.edge_edge import x_to_grad_psd_hess_ee
 from ipctk_wp.distance.point_edge import point_edge_distance, point_edge_distance_gradient_hessian
 from ipctk_wp.distance.point_point import point_point_distance_gradient_hessian
 from barrier import barrier_energy, barrier_derivative, barrier_derivative2
+from utils.data_collector import Profiller
 
 @wp.struct
 class Triplets:
@@ -26,7 +27,7 @@ class Triplets:
 solver_config = "cg"
 gravity = scalar(-10.0)
 eps = 1e-6
-contact_stiffness = scalar(4e6)
+contact_stiffness = scalar(4e8)
 
 wp.config.max_unroll = 1
 wp.config.enable_backward = False
@@ -216,7 +217,14 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
     hess_ej =  wp.zeros((4, 4), dtype = mat33)
     hess_cross = wp.zeros((4, 4), dtype = mat33)
 
-    if dist < c.l0 and z < alpha < o and z < beta < o:
+    a0 = alpha == z
+    a1 = alpha == o
+    beta0 = beta == z 
+    beta1 = beta == o
+    point_point = (a0 or a1) and (beta0 or beta1)
+    point_edge = a0 or a1 or beta0 or beta1
+    if dist < c.l0 and not point_edge:
+    # if dist < c.l0:
         b0 = soup.body[i0]
         b1 = soup.body[i2]
 
@@ -326,6 +334,7 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
                     triplets.vals[ic2] = wp.transpose(hess_cross[jj, ii])
 
     elif dist < c.l0:
+    # elif False:
         # _, da0 = point_edge_distance(x0, x2, x3)
         # _, da1 = point_edge_distance(x1, x2, x3)
         # _, db0 = point_edge_distance(x2, x0, x1)
@@ -338,13 +347,8 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
 
 
         # point-point cases first:
-        a0 = alpha == z
-        a1 = alpha == o
-        beta0 = beta == z 
-        beta1 = beta == o
         
         pe_stencil = wp.vec3i()
-        point_point = (a0 or a1) and (beta0 or beta1)
         if point_point:
             pp_stencil = wp.vec2i(0, 0)
             if a0 and beta0:
@@ -460,6 +464,7 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
             pe_stencil = wp.vec3i(i3, i0, i1)
         
         if not point_point:
+        # if False:
             ii0 = pe_stencil[0] 
             ii1 = pe_stencil[1]
             ii2 = pe_stencil[2]
@@ -528,7 +533,7 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
                         
             for ii in range(4):
                 gei = g0 * Jp[ii]
-                gej = g2 * Jej[0, ii] + g3 * Jej[1, ii]
+                gej = g1 * Jej[0, ii] + g2 * Jej[1, ii]
                 if inertia[b0].m > z:
                     wp.atomic_add(b, b0 * 4 + ii, gei)
                 if inertia[b1].m > z:
@@ -575,7 +580,6 @@ def forward_states(history: wp.array(dtype = BDFAffine), dt: scalar):
     history[i].nxt.qdot = q_dot
     history[i].now = history[i].nxt
 
-
 class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
     def __init__(self, h, config_file):
         AbdComplex.__init__(self, h, config_file)        
@@ -592,6 +596,7 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
         self.du = wp.zeros_like(self.rhs)
         self.triplets = triplets
         self.pattern_old = None 
+        self.profiler = Profiller(max_iters = 16, frames = 50)
 
     def compute_contact_gh(self):
         return 
@@ -635,7 +640,8 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
             new_pattern = self.bodywise_actual_contact()
             cond = self.pattern_old is None or self.pattern_diff(new_pattern, self.pattern_old)
             self.pattern_old = new_pattern
-            if cond:
+            # if cond:
+            if True:
                 with wp.ScopedTimer("build solver"):
                     A_scipy = self.to_scipy_csr(A_csr)
                     self.solver = dxslv.CUSolver(A_scipy)
@@ -646,8 +652,10 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
                 values = A_csr.values
                 self.solver.refactor_cuda(ptr(values))
             self.solver.solve_cuda(ptr(self.rhs), ptr(self.du))
+
+        residue = np.linalg.norm(self.rhs.numpy())
         du_norm = np.max(np.abs(self.du.numpy()))
-        return du_norm
+        return residue
 
     def pattern_diff(self, a, b):
         a_columns = a.columns.numpy()
@@ -679,14 +687,19 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
 
                     wp.launch(contact_hessian_ee, dim = (self.n_contacts, ), inputs = [self.history, self.soup, self.contacts_new.list, self.triplets, self.rhs, self.inertia, self.dt])
                     
-                    dq_norm = self.compute_du(iter) 
+                    residue = self.compute_du(iter) 
                     alpha = self.line_search()
                     # alpha = self.line_search_batch()
                     iter += 1
-                    print(f"    iter: {iter}, dq norm: {dq_norm}, alpha = {alpha}")
-                    newton = not (dq_norm < 1e-5 or iter >= max_iter)
+
+                    self.profiler.convergence[self.frame, iter - 1] = residue
+                    self.profiler.alphas[self.frame, iter - 1] = alpha
+
+                    print(f"    iter: {iter}, residue: {residue: .2e}, alpha = {alpha: .2e}")
+                    newton = not (residue < 1e-5 or iter >= max_iter)
                     
                 self.forward_states()
+                self.profiler.convergence[iter: max_iter] = self.profiler.convergence[self.frame, iter - 1]
 
     def bodywise_actual_contact(self):
         triplets = CSRTriplets()
