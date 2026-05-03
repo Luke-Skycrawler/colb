@@ -13,7 +13,10 @@ import numpy as np
 from geometry import Soup
 from ortho import energy_ortho, grad_ortho, hessian_ortho
 from ipctk_wp.distance.edge_edge import x_to_grad_psd_hess_ee
+from ipctk_wp.distance.point_edge import point_edge_distance, point_edge_distance_gradient_hessian
+from ipctk_wp.distance.point_point import point_point_distance_gradient_hessian
 from barrier import barrier_energy, barrier_derivative, barrier_derivative2
+
 @wp.struct
 class Triplets:
     rows: wp.array(dtype=int)
@@ -23,7 +26,7 @@ class Triplets:
 solver_config = "cg"
 gravity = scalar(-10.0)
 eps = 1e-6
-contact_stiffness = scalar(4e7)
+contact_stiffness = scalar(4e6)
 
 wp.config.max_unroll = 1
 wp.config.enable_backward = False
@@ -64,7 +67,8 @@ def energy_contact(states: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp
     i = wp.tid()
     c = contacts[i]
     
-    dist, v0, v1 = fetch_dist_v0v1(states, soup, c)
+    dab, v0, v1 = fetch_dist_v0v1(states, soup, c)
+    dist = dab[2]
     if dist < c.l0:
         de = barrier_energy(dist * dist) * dt * dt * contact_stiffness
         wp.atomic_add(e, 0, de)
@@ -188,7 +192,7 @@ def fetch_dist_v0v1(p: wp.array(dtype = BDFAffine), soup: Soup, c: XConstraint):
 
     dist = scalar(dab[2])
 
-    return dist, v0, v1
+    return vec3(dab), v0, v1
 
 @wp.kernel
 def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.array(dtype = XConstraint), triplets: Triplets, b: wp.array(dtype = vec3), inertia: wp.array(dtype = Inertia), dt: scalar):
@@ -197,13 +201,22 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
     z = scalar(0.0)
     c = contacts[i]
     
-    dist, v0, v1 = fetch_dist_v0v1(p, soup, c)
-    
-    if dist < c.l0:
-        i0 = c.a1a2b1b2[0]
-        i1 = c.a1a2b1b2[1]
-        i2 = c.a1a2b1b2[2]
-        i3 = c.a1a2b1b2[3]
+    dab, v0, v1 = fetch_dist_v0v1(p, soup, c)
+    dist = dab[2]
+    alpha = dab[0]
+    beta = dab[1]
+
+    i0 = c.a1a2b1b2[0]
+    i1 = c.a1a2b1b2[1]
+    i2 = c.a1a2b1b2[2]
+    i3 = c.a1a2b1b2[3]
+
+    h = wp.zeros((4, 4), dtype = mat33)
+    hess_ei = wp.zeros((4, 4), dtype = mat33)
+    hess_ej =  wp.zeros((4, 4), dtype = mat33)
+    hess_cross = wp.zeros((4, 4), dtype = mat33)
+
+    if dist < c.l0 and z < alpha < o and z < beta < o:
         b0 = soup.body[i0]
         b1 = soup.body[i2]
 
@@ -246,10 +259,6 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
         g2 = vec3(grad_dist[6], grad_dist[7], grad_dist[8])
         g3 = vec3(grad_dist[9], grad_dist[10], grad_dist[11])
 
-        h = wp.zeros((4, 4), dtype = mat33)
-        hess_ei = wp.zeros((4, 4), dtype = mat33)
-        hess_ej =  wp.zeros((4, 4), dtype = mat33)
-        hess_cross = wp.zeros((4, 4), dtype = mat33)
         
         for ii in range(4):
             for jj in range(4):
@@ -316,6 +325,247 @@ def contact_hessian_ee(p: wp.array(dtype = BDFAffine), soup: Soup, contacts: wp.
                     triplets.cols[ic2] = b0 * 4 + jj
                     triplets.vals[ic2] = wp.transpose(hess_cross[jj, ii])
 
+    elif dist < c.l0:
+        # _, da0 = point_edge_distance(x0, x2, x3)
+        # _, da1 = point_edge_distance(x1, x2, x3)
+        # _, db0 = point_edge_distance(x2, x0, x1)
+        # _, db1 = point_edge_distance(x3, x0, x1)
+        
+        # a0 = da0 < c.l0
+        # a1 = da1 < c.l0
+        # b0 = db0 < c.l0
+        # b1 = db1 < c.l0
+
+
+        # point-point cases first:
+        a0 = alpha == z
+        a1 = alpha == o
+        beta0 = beta == z 
+        beta1 = beta == o
+        
+        pe_stencil = wp.vec3i()
+        point_point = (a0 or a1) and (beta0 or beta1)
+        if point_point:
+            pp_stencil = wp.vec2i(0, 0)
+            if a0 and beta0:
+                pp_stencil = wp.vec2i(i0, i2)
+            elif a0 and beta1:
+                pp_stencil = wp.vec2i(i0, i3)
+            elif a1 and beta0:
+                pp_stencil = wp.vec2i(i1, i2)
+            elif a1 and beta1: 
+                pp_stencil = wp.vec2i(i1, i3)
+
+            ii0 = pp_stencil[0]
+            ii1 = pp_stencil[1]
+            b0 = soup.body[i0]
+            b1 = soup.body[i2]
+            
+            R0 = wp.transpose(p[b0].nxt.q)
+            R1 = wp.transpose(p[b1].nxt.q)
+            
+            x0_tilde = soup.xcs[ii0]
+            x1_tilde = soup.xcs[ii1]
+            x0 = R0 @ x0_tilde + p[b0].nxt.c
+            x1 = R1 @ x1_tilde + p[b1].nxt.c
+
+            grad_pp, hess_pp = point_point_distance_gradient_hessian(x0, x1)
+            
+            B_ = barrier_derivative(dist * dist)
+            B__ = barrier_derivative2(dist * dist)
+            
+            # hess_pp = B_ * hess_pp + B__ * wp.outer(grad_pp, grad_pp)
+            hess_pp = B__ * wp.outer(grad_pp, grad_pp)
+            
+            grad_pp *= contact_stiffness * B_ * dt * dt
+            hess_pp *= contact_stiffness * dt * dt
+
+
+            Jpi = vec4(o, x0_tilde.x, x0_tilde.y, x0_tilde.z)
+            Jpj = vec4(o, x1_tilde.x, x1_tilde.y, x1_tilde.z)
+            
+            g0 = vec3(grad_pp[0], grad_pp[1], grad_pp[2])
+            g1 = vec3(grad_pp[3], grad_pp[4], grad_pp[5])
+
+            
+            for ii in range(2):
+                for jj in range(2):
+                    h[ii, jj] = mat33(
+                        hess_pp[ii * 3 + 0, jj * 3 + 0], hess_pp[ii * 3 + 0, jj * 3 + 1], hess_pp[ii * 3 + 0, jj * 3 + 2],
+                        hess_pp[ii * 3 + 1, jj * 3 + 0], hess_pp[ii * 3 + 1, jj * 3 + 1], hess_pp[ii * 3 + 1, jj * 3 + 2],
+                        hess_pp[ii * 3 + 2, jj * 3 + 0], hess_pp[ii * 3 + 2, jj * 3 + 1], hess_pp[ii * 3 + 2, jj * 3 + 2]
+                    )
+            
+            for ii in range(4):
+                for jj in range(4):                    
+                    block_ei = Jpi[ii] * Jpi[jj] * h[0, 0]
+                    block_ej = Jpj[ii] * Jpj[jj] * h[1, 1]
+                    block_cross = Jpi[ii] * Jpj[jj] * h[0, 1]
+                    
+
+                    hess_ei[ii, jj] = block_ei
+                    hess_ej[ii, jj] = block_ej
+                    hess_cross[ii, jj] = block_cross
+                        
+                            
+                        
+            for ii in range(4):
+                gei = g0 * Jpi[ii]
+                gej = g1 * Jpj[ii]
+                if inertia[b0].m > z:
+                    wp.atomic_add(b, b0 * 4 + ii, gei)
+                if inertia[b1].m > z:
+                    wp.atomic_add(b, b1 * 4 + ii, gej)
+
+            for ii in range(4):
+                for jj in range(4):
+                    m0 = inertia[b0].m
+                    m1 = inertia[b1].m
+                    if m0 > z:
+                        # hess ei
+                        iei = i * 64 + ii * 4 + jj
+                        triplets.rows[iei] = b0 * 4 + ii 
+                        triplets.cols[iei] = b0 * 4 + jj
+                        triplets.vals[iei] = hess_ei[ii, jj]
+
+                    if m1 > z:
+                        # hess ej 
+                        iej = i * 64 + 16 + ii * 4 + jj
+                        triplets.rows[iej] = b1 * 4 + ii
+                        triplets.cols[iej] = b1 * 4 + jj
+                        triplets.vals[iej] = hess_ej[ii, jj]
+
+                    if m0 > z and m1 > z:
+                        # cross terms 
+                        ic1 = i * 64 + 32 + ii * 4 + jj
+                        ic2 = i * 64 + 48 + ii * 4 + jj
+                        
+                        triplets.rows[ic1] = b0 * 4 + ii
+                        triplets.cols[ic1] = b1 * 4 + jj
+                        triplets.vals[ic1] = hess_cross[ii, jj]
+
+                        triplets.rows[ic2] = b1 * 4 + ii
+                        triplets.cols[ic2] = b0 * 4 + jj
+                        triplets.vals[ic2] = wp.transpose(hess_cross[jj, ii])
+            
+
+                
+        elif a0:
+            pe_stencil = wp.vec3i(i0, i2, i3)
+        elif a1: 
+            pe_stencil = wp.vec3i(i1, i2, i3)
+        elif beta0: 
+            pe_stencil = wp.vec3i(i2, i0, i1)
+        elif beta1: 
+            pe_stencil = wp.vec3i(i3, i0, i1)
+        
+        if not point_point:
+            ii0 = pe_stencil[0] 
+            ii1 = pe_stencil[1]
+            ii2 = pe_stencil[2]
+
+            b0 = soup.body[ii0]
+            b1 = soup.body[ii1]
+            
+            R0 = wp.transpose(p[b0].nxt.q)  
+            R1 = wp.transpose(p[b1].nxt.q)
+
+            x0_tilde = soup.xcs[ii0]
+            x1_tilde = soup.xcs[ii1]
+            x2_tilde = soup.xcs[ii2]
+            x0 = R0 @ x0_tilde + p[b0].nxt.c
+            x1 = R1 @ x1_tilde + p[b1].nxt.c
+            x2 = R1 @ x2_tilde + p[b1].nxt.c
+
+            _grad_pe, hess_pe = point_edge_distance_gradient_hessian(x0, x1, x2)
+            grad_pe = vec9(_grad_pe[0,0], _grad_pe[0,1], _grad_pe[0,2], _grad_pe[1,0], _grad_pe[1,1], _grad_pe[1,2], _grad_pe[2,0], _grad_pe[2,1], _grad_pe[2,2])
+            
+            B_ = barrier_derivative(dist * dist)
+            B__ = barrier_derivative2(dist * dist)
+
+            hess_pe = B_ * hess_pe + B__ * wp.outer(grad_pe, grad_pe)
+            grad_pe *= contact_stiffness * B_ * dt * dt
+            hess_pe *= contact_stiffness * dt * dt
+
+            
+            Jp = vec4(o, x0_tilde.x, x0_tilde.y, x0_tilde.z)
+            Jej = wp.matrix_from_rows(
+                vec4(o, x1_tilde.x, x1_tilde.y, x1_tilde.z),
+                vec4(o, x2_tilde.x, x2_tilde.y, x2_tilde.z),
+            )
+
+            g0 = vec3(grad_pe[0], grad_pe[1], grad_pe[2])
+            g1 = vec3(grad_pe[3], grad_pe[4], grad_pe[5])
+            g2 = vec3(grad_pe[6], grad_pe[7], grad_pe[8])
+
+            
+            for ii in range(3):
+                for jj in range(3):
+                    h[ii, jj] = mat33(
+                        hess_pe[ii * 3 + 0, jj * 3 + 0], hess_pe[ii * 3 + 0, jj * 3 + 1], hess_pe[ii * 3 + 0, jj * 3 + 2],
+                        hess_pe[ii * 3 + 1, jj * 3 + 0], hess_pe[ii * 3 + 1, jj * 3 + 1], hess_pe[ii * 3 + 1, jj * 3 + 2],
+                        hess_pe[ii * 3 + 2, jj * 3 + 0], hess_pe[ii * 3 + 2, jj * 3 + 1], hess_pe[ii * 3 + 2, jj * 3 + 2]
+                    )
+            
+            for ii in range(4):
+                for jj in range(4):
+                    block_ej = mat33()
+                    block_cross = mat33()
+                    
+                    block_ei = Jp[ii] * Jp[jj] * h[0, 0]
+                    
+                    for l in range(2):
+                        block_cross += Jp[ii] * Jej[l, jj] * h[0, l + 1]
+                    for k in range(2):
+                        for l in range(2):
+                            block_ej += Jej[k, ii] * Jej[l, jj] * h[k + 1, l + 1]
+
+                    hess_ei[ii, jj] = block_ei
+                    hess_ej[ii, jj] = block_ej
+                    hess_cross[ii, jj] = block_cross
+                        
+                            
+                        
+            for ii in range(4):
+                gei = g0 * Jp[ii]
+                gej = g2 * Jej[0, ii] + g3 * Jej[1, ii]
+                if inertia[b0].m > z:
+                    wp.atomic_add(b, b0 * 4 + ii, gei)
+                if inertia[b1].m > z:
+                    wp.atomic_add(b, b1 * 4 + ii, gej)
+
+            for ii in range(4):
+                for jj in range(4):
+                    m0 = inertia[b0].m
+                    m1 = inertia[b1].m
+                    if m0 > z:
+                        # hess ei
+                        iei = i * 64 + ii * 4 + jj
+                        triplets.rows[iei] = b0 * 4 + ii 
+                        triplets.cols[iei] = b0 * 4 + jj
+                        triplets.vals[iei] = hess_ei[ii, jj]
+
+                    if m1 > z:
+                        # hess ej 
+                        iej = i * 64 + 16 + ii * 4 + jj
+                        triplets.rows[iej] = b1 * 4 + ii
+                        triplets.cols[iej] = b1 * 4 + jj
+                        triplets.vals[iej] = hess_ej[ii, jj]
+
+                    if m0 > z and m1 > z:
+                        # cross terms 
+                        ic1 = i * 64 + 32 + ii * 4 + jj
+                        ic2 = i * 64 + 48 + ii * 4 + jj
+                        
+                        triplets.rows[ic1] = b0 * 4 + ii
+                        triplets.cols[ic1] = b1 * 4 + jj
+                        triplets.vals[ic1] = hess_cross[ii, jj]
+
+                        triplets.rows[ic2] = b1 * 4 + ii
+                        triplets.cols[ic2] = b0 * 4 + jj
+                        triplets.vals[ic2] = wp.transpose(hess_cross[jj, ii])
+
+             
 @wp.kernel
 def forward_states(history: wp.array(dtype = BDFAffine), dt: scalar):
     i = wp.tid()
@@ -497,7 +747,8 @@ class NewtonAbd(LineSearchInterface, AbdComplex, ContactSolverBase):
 def get_contact_points(p: wp.array(dtype = BDFAffine), soup: Soup, xconstraints: wp.array(dtype = XConstraint), contact_ret: ContactRet):
     i = wp.tid()
     c = xconstraints[i]
-    dist, v0, v1 = fetch_dist_v0v1(p, soup, c)
+    dab, v0, v1 = fetch_dist_v0v1(p, soup, c)
+    dist = dab[2]
     contact_ret.points[i] = (v0 + v1) * scalar(0.5)
     contact_ret.dists[i] = dist
 
@@ -525,7 +776,8 @@ def bodywise_actual_contact(history: wp.array(dtype = BDFAffine), contacts: wp.a
     i = wp.tid()
     c = contacts[i]
     b0, b1 = fetch_b0b1(c, soup)
-    dist, v0, v1 = fetch_dist_v0v1(history, soup, c)
+    dab, v0, v1 = fetch_dist_v0v1(history, soup, c)
+    dist = dab[2]
     if b0 != b1 and dist < c.l0: 
         triplets.rows[i * 2 + 0] = b0
         triplets.cols[i * 2 + 0] = b1

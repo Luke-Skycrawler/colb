@@ -9,6 +9,7 @@ scalar = wp.float64
 quat = wp.quatd
 mat6 = wp.spatial_matrixd
 vec6 = wp.spatial_vectord
+vec9 = wp.types.vector(length=9, dtype=scalar)
 vec12 = wp.types.vector(length=12, dtype=scalar)
 mat12 = wp.types.matrix(shape = (12, 12), dtype = scalar)
 
@@ -16,3 +17,7 @@ mat34 = wp.types.matrix(shape = (3, 4), dtype = scalar)
 mat24 = wp.types.matrix(shape = (2, 4), dtype = scalar)
 mat12 = wp.types.matrix(shape = (12, 12), dtype = scalar)
 mat99 = wp.types.matrix(shape = (9, 9), dtype = scalar)
+
+@wp.func 
+def make_vec6(v0: vec3, v1: vec3):
+    return vec6(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z)
